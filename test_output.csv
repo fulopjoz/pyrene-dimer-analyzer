@@ -1,5 +1,0 @@
-molecule,conformer_id,plane_angle_deg,interplane_distance_A,pi_overlap_pct,centroid_distance_A,slip_stack_A,bridge_dihedral_L_deg,bridge_dihedral_R_deg,energy_kcal_mol
-Dimer_pyrene2x_R2x_Et_each_pyrene,0,66.840,1.174,0.000,7.861,7.772,118.763,,
-Dimer_pyrene2x_R2x_iPr_each_pyrene,0,8.959,3.510,37.699,4.561,2.913,119.670,,
-Dimer_pyrene2x_R2x_cHex_each_pyrene,0,52.183,1.970,16.813,7.591,7.331,-119.345,148.149,
-Dimer_pyrene2x_R2x_tBu_each_pyrene,0,86.263,0.521,0.000,8.436,8.420,-130.097,-37.696,
