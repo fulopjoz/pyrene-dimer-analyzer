@@ -52,6 +52,7 @@ setup(
         "shapely>=2.0.0",
         "click>=8.1.0",
         "tqdm>=4.65.0",
+        "openpyxl>=3.0.0",
     ],
     extras_require={
         "dev": [

@@ -21,3 +21,6 @@ click>=8.1.0
 
 # Progress bars
 tqdm>=4.65.0
+
+# Excel export
+openpyxl>=3.0.0
