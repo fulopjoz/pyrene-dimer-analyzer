@@ -162,16 +162,26 @@ class PyreneDimerAnalyzer:
         # Merge connected rings into clusters
         clusters = self._merge_connected_rings(aromatic_rings)
         
+        # Filter clusters to only include pyrene-like systems (>= 10 atoms)
+        # Pyrene has 16 atoms, so we look for clusters with at least 10
+        pyrene_clusters = [c for c in clusters if len(c) >= 10]
+        
+        # If we don't have 2 pyrene-sized clusters, try with smaller threshold
+        if len(pyrene_clusters) < 2:
+            pyrene_clusters = sorted(clusters, key=len, reverse=True)[:2]
+        
         # Should have 2 clusters (2 pyrenes)
-        if len(clusters) < 2:
+        if len(pyrene_clusters) < 2:
             raise ValueError(
                 f"Could not identify 2 pyrene systems. "
                 f"Found {len(clusters)} aromatic cluster(s)."
             )
         
-        if len(clusters) > 2:
-            self.log(f"Warning: Found {len(clusters)} aromatic clusters, using 2 largest")
-            clusters = sorted(clusters, key=len, reverse=True)[:2]
+        if len(pyrene_clusters) > 2:
+            self.log(f"Warning: Found {len(pyrene_clusters)} aromatic clusters, using 2 largest")
+            pyrene_clusters = sorted(pyrene_clusters, key=len, reverse=True)[:2]
+        
+        clusters = pyrene_clusters
         
         pyrene1 = sorted(list(clusters[0]))
         pyrene2 = sorted(list(clusters[1]))
@@ -539,8 +549,12 @@ class PyreneDimerAnalyzer:
         
         all_results = []
         for mol, name in molecules:
-            df = self.analyze_molecule(mol, name, show_progress)
-            all_results.append(df)
+            try:
+                df = self.analyze_molecule(mol, name, show_progress)
+                all_results.append(df)
+            except ValueError as e:
+                self.log(f"Skipping {name}: {e}")
+                continue
         
         if not all_results:
             return pd.DataFrame()
