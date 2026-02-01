@@ -1,0 +1,18 @@
+include LICENSE
+include README.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include requirements.txt
+include requirements-dev.txt
+include pyproject.toml
+
+recursive-include pyrene_analyzer *.py
+recursive-include tests *.py
+recursive-include docs *.md *.bib
+recursive-include examples *.py
+recursive-include notebooks *.ipynb
+
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.egg-info
+recursive-exclude * .git*
