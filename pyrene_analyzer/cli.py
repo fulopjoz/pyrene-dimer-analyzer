@@ -11,20 +11,13 @@ Usage:
 """
 
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
 import click
 
-from pyrene_analyzer import __version__
-from pyrene_analyzer.core import PyreneDimerAnalyzer
-from pyrene_analyzer.io import export_to_csv, export_to_excel, export_to_json
-from pyrene_analyzer.visualization import (
-    create_summary_figure,
-    plot_angle_vs_energy,
-    plot_conformer_distribution,
-    plot_distance_vs_overlap,
-)
+from pyrene_analyzer.aromatic_systems import AROMATIC_SYSTEMS
 
 
 @click.group(invoke_without_command=True)
@@ -32,18 +25,22 @@ from pyrene_analyzer.visualization import (
 @click.pass_context
 def cli(ctx: click.Context, version: bool) -> None:
     """
-    Pyrene Dimer Analyzer - Automated geometric analysis of pyrene dimer conformers.
+    Aromatic Dimer Analyzer - Automated geometric analysis of aromatic dimer conformers.
 
-    Analyzes pyrene dimer molecular geometries including plane-plane angles,
-    inter-plane distances, and π-π overlap calculations.
+    Analyzes aromatic dimer molecular geometries including plane-plane angles,
+    inter-plane distances, and pi-pi overlap calculations. Supports pyrene,
+    perylene, anthracene, naphthalene, phenanthrene, and custom SMARTS patterns.
 
     \b
     Examples:
-        pyrene-analyze analyze input.sdf -o results.csv
-        pyrene-analyze analyze Et.sdf iPr.sdf -o all_results.csv --plot
+        pyrene-analyze analyze tests/test_data/pyrene_dimer_set_for_MOE.sdf -o results.csv
+        pyrene-analyze analyze tests/test_data/pyrene_dimer_set_for_MOE.sdf -o results.csv --system perylene
+        pyrene-analyze analyze tests/test_data/pyrene_dimer_set_for_MOE.sdf -o results.csv --plot
         pyrene-analyze info
     """
     if version:
+        from pyrene_analyzer import __version__
+
         click.echo(f"pyrene-dimer-analyzer version {__version__}")
         ctx.exit()
 
@@ -86,7 +83,18 @@ def cli(ctx: click.Context, version: bool) -> None:
 @click.option(
     "--no-shapely",
     is_flag=True,
-    help="Disable Shapely for π-overlap (use approximation).",
+    help="Disable Shapely for pi-overlap (use approximation).",
+)
+@click.option(
+    "-s",
+    "--system",
+    default="pyrene",
+    help="Aromatic system type (pyrene, perylene, anthracene, naphthalene, phenanthrene).",
+)
+@click.option(
+    "--custom-smarts",
+    default=None,
+    help="Custom SMARTS pattern for aromatic ring detection.",
 )
 def analyze(
     input_files: Tuple[str, ...],
@@ -99,6 +107,8 @@ def analyze(
     quiet: bool,
     classify: bool,
     no_shapely: bool,
+    system: str,
+    custom_smarts: Optional[str],
 ) -> None:
     """
     Analyze pyrene dimer conformers from molecular structure files.
@@ -108,26 +118,47 @@ def analyze(
 
     \b
     Examples:
-        pyrene-analyze analyze conformers.sdf -o results.csv
-        pyrene-analyze analyze Et.sdf iPr.sdf cHex.sdf -o all_results.csv
-        pyrene-analyze analyze input.sdf -o results.csv --plot --verbose
+        pyrene-analyze analyze tests/test_data/pyrene_dimer_set_for_MOE.sdf -o results.csv
+        pyrene-analyze analyze tests/test_data/pyrene_dimer_set_for_MOE.sdf -o results.csv --plot --verbose
+        # pyrene-analyze analyze Et.sdf iPr.sdf cHex.sdf -o all_results.csv
     """
+    if not quiet:
+        click.echo("Running analysis...", nl=True)
+        sys.stdout.flush()
+
+    from pyrene_analyzer.core import AromaticDimerAnalyzer
+    from pyrene_analyzer.io import export_to_csv, export_to_excel, export_to_json
+
     # Set verbosity
     if quiet:
         verbose = False
 
     # Initialize analyzer
-    analyzer = PyreneDimerAnalyzer(verbose=verbose, use_shapely=not no_shapely)
+    if custom_smarts:
+        analyzer = AromaticDimerAnalyzer(
+            verbose=verbose,
+            use_shapely=not no_shapely,
+            custom_smarts=custom_smarts,
+        )
+    else:
+        analyzer = AromaticDimerAnalyzer(
+            aromatic_system=system,
+            verbose=verbose,
+            use_shapely=not no_shapely,
+        )
 
     # Process files
     if not quiet:
         click.echo(f"Processing {len(input_files)} file(s)...")
+        sys.stdout.flush()
 
     try:
         if len(input_files) == 1:
-            results = analyzer.analyze_file(input_files[0])
+            results = analyzer.analyze_file(input_files[0], show_progress=False)
         else:
-            results = analyzer.batch_analyze(list(input_files), n_jobs=jobs)
+            results = analyzer.batch_analyze(
+                list(input_files), n_jobs=jobs, show_progress=False
+            )
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
@@ -165,6 +196,13 @@ def analyze(
 
     # Generate plots if requested
     if plot:
+        from pyrene_analyzer.visualization import (
+            create_summary_figure,
+            plot_angle_vs_energy,
+            plot_conformer_distribution,
+            plot_distance_vs_overlap,
+        )
+
         if plot_dir:
             plot_path = Path(plot_dir)
         else:
@@ -215,7 +253,7 @@ def analyze(
             f"{results['interplane_distance_A'].max():.2f} Å"
         )
         click.echo(
-            f"π-overlap range: {results['pi_overlap_pct'].min():.1f} - "
+            f"pi-overlap range: {results['pi_overlap_pct'].min():.1f} - "
             f"{results['pi_overlap_pct'].max():.1f}%"
         )
 
@@ -231,43 +269,355 @@ def info() -> None:
     """
     Display information about the package and its capabilities.
     """
+    from pyrene_analyzer import __version__
+
     click.echo(f"""
-Pyrene Dimer Analyzer v{__version__}
+Aromatic Dimer Analyzer v{__version__}
 {'='*50}
 
-A Python package for automated geometric analysis of pyrene dimer conformers.
+A Python package for automated geometric analysis of aromatic dimer conformers.
 
 CAPABILITIES:
-  • Automatic pyrene ring detection using SMARTS patterns
-  • Plane-plane angle (θ) calculation using SVD
-  • Inter-plane distance (d) measurement
-  • π-π overlap estimation using Shapely polygon intersection
-  • Bridge dihedral angle calculation
-  • Batch processing with parallel execution
-  • Publication-quality visualization
+  - Multiple aromatic system support (pyrene, perylene, anthracene, etc.)
+  - Automatic aromatic ring detection using SMARTS patterns
+  - Plane-plane angle (theta) calculation using SVD
+  - Inter-plane distance (d) measurement with high-angle warnings
+  - pi-pi overlap estimation using Shapely polygon intersection
+  - Bridge dihedral angle calculation
+  - System-specific excimer classification thresholds
+  - Batch processing with parallel execution
+  - Publication-quality visualization
 
 SUPPORTED FORMATS:
   Input:  SDF, MOL2, PDB
   Output: CSV, JSON, Excel
+""")
 
-EXCIMER FORMATION CRITERIA:
-  Strong excimer: θ < 20°, d = 3.3-3.7 Å, overlap > 70%
-  Weak excimer:   θ = 20-60°, d < 4.5 Å, overlap > 30%
-  Monomer:        θ > 60° or d > 4.5 Å or overlap < 30%
+    click.echo("SUPPORTED AROMATIC SYSTEMS:")
+    for name, system in AROMATIC_SYSTEMS.items():
+        t = system.thresholds
+        d_min, d_max = t.strong_distance_range
+        click.echo(f"  {name} (SMARTS: {system.smarts}):")
+        click.echo(
+            f"    Strong: theta < {t.strong_angle_max:.0f} deg, "
+            f"d = {d_min}-{d_max} A, overlap > {t.strong_overlap_min:.0f}%"
+        )
+        click.echo(
+            f"    Weak:   theta < {t.weak_angle_max:.0f} deg, "
+            f"d < {t.weak_distance_max} A, overlap > {t.weak_overlap_min:.0f}%"
+        )
 
+    click.echo(f"""
 REFERENCES:
-  • Birks, J.B. (1970). Photophysics of Aromatic Molecules
-  • Stevens, B. (1968). Proc. Royal Soc. A, 305, 55-70
-  • Poisson, L. et al. (2017). Phys. Chem. Chem. Phys., 19, 23492
-  • Ge, Y. et al. (2020). J. Mater. Chem. C, 8, 10223
+  - Birks, J.B. (1970). Photophysics of Aromatic Molecules
+  - Ge, Y. et al. (2020). J. Mater. Chem. C, 8, 10223
+  - Basuroy et al. (2021). J. Chem. Phys., 155, 234304
+  - Mazzeo et al. (2024). ChemRxiv (twisted excimers)
 
 USAGE:
   pyrene-analyze analyze input.sdf -o results.csv
+  pyrene-analyze analyze input.sdf -o results.csv --system perylene
   pyrene-analyze analyze *.sdf -o results.csv --plot --verbose
 
 For more information, visit:
   https://github.com/research-team/pyrene-dimer-analyzer
 """)
+
+
+@cli.command()
+@click.argument("template", type=click.Path(exists=True))
+@click.option(
+    "-r",
+    "--r-group",
+    required=True,
+    help='SMARTS pattern for R-group to replace (e.g., "[CH2][CH3]" for ethyl).',
+)
+@click.option(
+    "-s",
+    "--system",
+    default="pyrene",
+    help="Aromatic system for classification.",
+)
+@click.option(
+    "-n",
+    "--num-confs",
+    default=50,
+    type=int,
+    help="Number of conformers per molecule.",
+)
+@click.option(
+    "--energy-window",
+    default=10.0,
+    type=float,
+    help="Energy window in kcal/mol (default: 10).",
+)
+@click.option(
+    "-o",
+    "--output",
+    required=True,
+    type=click.Path(),
+    help="Output CSV file for results.",
+)
+@click.option("-p", "--plot", is_flag=True, help="Generate comparison plots.")
+@click.option(
+    "--substituents-file",
+    type=click.Path(exists=True),
+    help="Custom substituents JSON file (default: built-in ~25 groups).",
+)
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
+@click.option(
+    "--no-bias",
+    is_flag=True,
+    help="Disable biased conformer generation (use standard ETKDGv3 only).",
+)
+@click.option(
+    "--optimizer",
+    default="MMFF94s",
+    type=click.Choice(["MMFF94s", "GFN2-xTB", "MACE-OFF23", "none"], case_sensitive=False),
+    help="Optimizer for conformers (MMFF94s=fast, MACE-OFF23=DFT-quality, GFN2-xTB=accurate).",
+)
+def screen(
+    template: str,
+    r_group: str,
+    system: str,
+    num_confs: int,
+    energy_window: float,
+    output: str,
+    plot: bool,
+    substituents_file: Optional[str],
+    verbose: bool,
+    no_bias: bool,
+    optimizer: str,
+) -> None:
+    """
+    Virtual screening: enumerate substituents and analyze conformer geometries.
+
+    Replaces R-groups on a template dimer with ~25 common substituents,
+    generates conformer ensembles (biased ETKDGv3 + MMFF94s), analyzes
+    geometric parameters, and ranks substituents by excimer-forming potential.
+
+    By default, uses distance-constrained (biased) conformer generation to
+    improve sampling of pi-stacking geometries. Use --no-bias to disable.
+
+    \b
+    Examples:
+        # pyrene-analyze screen template.sdf -r "[CH2][CH3]" -o results.csv
+        # pyrene-analyze screen template.sdf -r "[CH2][CH3]" -o results.csv --plot -v
+        # pyrene-analyze screen template.sdf -r "[CH2][CH3]" -o results.csv --no-bias
+    """
+    from pyrene_analyzer.screening import (
+        SubstituentScreener,
+        load_substituents_from_file,
+    )
+
+    # Load custom substituents if provided
+    substituents = None
+    if substituents_file:
+        try:
+            substituents = load_substituents_from_file(substituents_file)
+            if not verbose:
+                click.echo(f"Loaded {len(substituents)} substituents from {substituents_file}")
+        except Exception as e:
+            click.echo(f"Error loading substituents file: {e}", err=True)
+            sys.exit(1)
+
+    # Initialize screener
+    try:
+        screener = SubstituentScreener(
+            template_sdf=template,
+            r_group_smarts=r_group,
+            aromatic_system=system,
+            verbose=verbose,
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    # Run screening
+    try:
+        results_df, summary_df = screener.screen(
+            substituents=substituents,
+            num_confs=num_confs,
+            energy_window=energy_window,
+            use_biased=not no_bias,
+            optimizer=optimizer,
+        )
+    except Exception as e:
+        click.echo(f"Error during screening: {e}", err=True)
+        sys.exit(1)
+
+    if results_df.empty:
+        click.echo("No results generated.", err=True)
+        sys.exit(1)
+
+    # Save results
+    output_path = Path(output)
+    results_df.to_csv(
+        output_path.with_suffix(".csv"), index=False, encoding="utf-8-sig"
+    )
+    click.echo(f"Saved detailed results: {output_path.with_suffix('.csv')}")
+
+    summary_path = output_path.with_name(output_path.stem + "_summary.csv")
+    summary_df.to_csv(summary_path, encoding="utf-8-sig")
+    click.echo(f"Saved summary: {summary_path}")
+
+    # Generate plots if requested
+    if plot:
+        from pyrene_analyzer.visualization import (
+            create_summary_figure,
+            plot_conformer_distribution,
+            plot_distance_vs_overlap,
+        )
+
+        plot_path = output_path.parent / "screening_plots"
+        plot_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            plot_distance_vs_overlap(
+                results_df,
+                output=plot_path / "distance_vs_overlap.png",
+                color_by="substituent" if "substituent" in results_df.columns else None,
+            )
+            click.echo(f"Saved: {plot_path / 'distance_vs_overlap.png'}")
+
+            create_summary_figure(results_df, output=plot_path / "summary.png")
+            click.echo(f"Saved: {plot_path / 'summary.png'}")
+
+            plot_conformer_distribution(
+                results_df, output=plot_path / "distributions.png"
+            )
+            click.echo(f"Saved: {plot_path / 'distributions.png'}")
+        except Exception as e:
+            click.echo(f"Warning: Could not generate some plots: {e}", err=True)
+
+
+@cli.command("analyze-smiles")
+@click.argument("smiles")
+@click.option(
+    "-s",
+    "--system",
+    default="pyrene",
+    help="Aromatic system type (pyrene, perylene, anthracene, naphthalene, phenanthrene).",
+)
+@click.option(
+    "-n",
+    "--num-confs",
+    default=100,
+    type=int,
+    help="Number of conformers to generate (default: 100).",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    help="Output CSV file for results.",
+)
+@click.option(
+    "--energy-window",
+    default=10.0,
+    type=float,
+    help="Energy window in kcal/mol (default: 10).",
+)
+@click.option(
+    "--no-bias",
+    is_flag=True,
+    help="Disable biased conformer generation (use standard ETKDGv3 only).",
+)
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
+@click.option(
+    "--optimizer",
+    default="MMFF94s",
+    type=click.Choice(["MMFF94s", "GFN2-xTB", "MACE-OFF23", "none"], case_sensitive=False),
+    help="Optimizer for conformers (MMFF94s=fast, MACE-OFF23=DFT-quality, GFN2-xTB=accurate).",
+)
+def analyze_smiles(
+    smiles: str,
+    system: str,
+    num_confs: int,
+    output: Optional[str],
+    energy_window: float,
+    no_bias: bool,
+    verbose: bool,
+    optimizer: str,
+) -> None:
+    """
+    Analyze an aromatic dimer directly from a SMILES string.
+
+    Generates conformers (with biased sampling by default), analyzes geometric
+    parameters, and classifies excimer-forming potential. No SDF file needed.
+
+    \b
+    Examples:
+        pyrene-analyze analyze-smiles "CCc1ccc2ccccc2c1CCc1ccc2ccccc2c1CC" -s naphthalene
+        pyrene-analyze analyze-smiles "SMILES" -o results.csv -n 200 -v
+        pyrene-analyze analyze-smiles "SMILES" --no-bias -s pyrene
+    """
+    from pyrene_analyzer.screening import analyze_from_smiles
+
+    # Always show coarse progress (not gated by verbose)
+    bias_mode = "standard ETKDGv3" if no_bias else "biased ETKDGv3"
+    click.echo(f"Starting analysis pipeline ({num_confs} conformers, {bias_mode})...")
+    click.echo(f"  This typically takes 60-180s for 100 conformers.")
+    click.echo("")
+
+    if verbose:
+        click.echo(f"SMILES: {smiles}")
+        click.echo(f"System: {system}")
+        click.echo(f"Energy window: {energy_window} kcal/mol")
+        click.echo("")
+
+    pipeline_start = time.time()
+
+    try:
+        results_df, summary = analyze_from_smiles(
+            smiles=smiles,
+            aromatic_system=system,
+            num_confs=num_confs,
+            energy_window=energy_window,
+            use_biased=not no_bias,
+            random_seed=42,
+            verbose=verbose,
+            optimizer=optimizer,
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error during analysis: {e}", err=True)
+        sys.exit(1)
+
+    elapsed = time.time() - pipeline_start
+    click.echo(f"\nCompleted in {elapsed:.1f} seconds.")
+
+    if results_df.empty:
+        click.echo("No results generated.", err=True)
+        sys.exit(1)
+
+    # Save results if output specified
+    if output:
+        output_path = Path(output).with_suffix(".csv")
+        results_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+        click.echo(f"Saved: {output_path}")
+
+    # Print summary
+    click.echo(f"\n{'='*60}")
+    click.echo("ANALYSIS SUMMARY")
+    click.echo(f"{'='*60}")
+    click.echo(f"Conformers analyzed: {summary['n_conformers']}")
+    click.echo(f"Excimer conformers:  {summary.get('n_excimer', 0)}")
+    click.echo(f"Excimer fraction:    {summary['excimer_fraction']:.1%}")
+
+    if summary.get("mean_angle") is not None:
+        click.echo(f"Mean plane angle:    {summary['mean_angle']:.1f} deg")
+        click.echo(f"Mean distance:       {summary['mean_distance']:.2f} A")
+        click.echo(f"Mean pi-overlap:     {summary['mean_overlap']:.1f}%")
+        click.echo(f"Best pi-overlap:     {summary['best_overlap']:.1f}%")
+
+    if "classification" in results_df.columns:
+        click.echo("\nClassification breakdown:")
+        for cls, count in results_df["classification"].value_counts().items():
+            pct = 100 * count / len(results_df)
+            click.echo(f"  {cls}: {count} ({pct:.1f}%)")
 
 
 @cli.command()
@@ -281,6 +631,7 @@ def preview(input_file: str, num: int) -> None:
 
     Shows the first N conformers with their geometric properties.
     """
+    from pyrene_analyzer.core import AromaticDimerAnalyzer
     from pyrene_analyzer.io import load_molecules
 
     click.echo(f"Loading: {input_file}")
@@ -300,7 +651,7 @@ def preview(input_file: str, num: int) -> None:
         click.echo(f"  Conformers: {n_confs}")
 
         if n_confs > 0:
-            analyzer = PyreneDimerAnalyzer(verbose=False)
+            analyzer = AromaticDimerAnalyzer(verbose=False)
             try:
                 pyrene1, pyrene2 = analyzer.identify_pyrene_rings(mol)
                 click.echo(f"  Pyrene 1 atoms: {len(pyrene1)}")

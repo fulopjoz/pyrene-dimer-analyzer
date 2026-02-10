@@ -2,11 +2,13 @@
 Core Module
 ===========
 
-Main analyzer class for pyrene dimer conformational analysis.
+Main analyzer class for aromatic dimer conformational analysis.
 
-This module provides the PyreneDimerAnalyzer class, which orchestrates
-the complete analysis workflow including:
-- Automatic pyrene ring detection using SMARTS patterns
+This module provides the AromaticDimerAnalyzer class (with backward-compatible
+alias PyreneDimerAnalyzer), which orchestrates the complete analysis workflow
+including:
+- Automatic aromatic ring detection using SMARTS patterns
+- Support for multiple aromatic systems (pyrene, perylene, anthracene, etc.)
 - Geometric analysis of all conformers
 - Batch processing of multiple molecules
 - Progress tracking and parallel processing
@@ -24,66 +26,115 @@ from rdkit.Chem import rdMolTransforms
 from tqdm import tqdm
 
 from pyrene_analyzer.geometry import (
+    DistanceCalibration,
     calculate_centroid_distance,
     calculate_interplane_distance,
     calculate_pi_overlap,
     calculate_plane_angle,
     calculate_slip_stack_displacement,
 )
+from pyrene_analyzer.aromatic_systems import (
+    AROMATIC_SYSTEMS,
+    AromaticSystem,
+    ClassificationThresholds,
+    get_system,
+)
 from pyrene_analyzer.io import load_molecules
 
 # SMARTS pattern for pyrene (4 fused 6-membered aromatic rings)
-# This pattern matches the core pyrene structure
+# Kept for backward compatibility. Canonical source is now aromatic_systems.py.
 PYRENE_SMARTS = "c1cc2ccc3cccc4ccc(c1)c2c34"
 
 # Alternative: simpler pattern for fused aromatic systems
 FUSED_AROMATIC_SMARTS = "c1ccc2ccccc2c1"  # Naphthalene-like
 
 
-class PyreneDimerAnalyzer:
+class AromaticDimerAnalyzer:
     """
-    Analyzer for pyrene dimer geometric properties.
+    Analyzer for aromatic dimer geometric properties.
 
     This class provides methods for analyzing the geometric relationships
-    between two pyrene ring systems in a covalently-linked dimer, including
+    between two aromatic ring systems in a covalently-linked dimer, including
     plane-plane angles, inter-plane distances, and π-overlap calculations.
+
+    Supports multiple aromatic systems (pyrene, perylene, anthracene,
+    naphthalene, phenanthrene) with system-specific classification thresholds.
+    Custom SMARTS patterns can also be provided for arbitrary aromatic systems.
 
     Attributes:
         verbose: If True, print progress messages.
-        use_smarts: If True, use SMARTS patterns for pyrene detection.
+        use_smarts: If True, use SMARTS patterns for ring detection.
         use_shapely: If True, use Shapely for accurate π-overlap calculation.
 
     Example:
-        >>> from pyrene_analyzer import PyreneDimerAnalyzer
-        >>> analyzer = PyreneDimerAnalyzer(verbose=True)
+        >>> from pyrene_analyzer import AromaticDimerAnalyzer
+        >>> analyzer = AromaticDimerAnalyzer(aromatic_system="pyrene")
         >>> results = analyzer.analyze_file('conformers.sdf')
         >>> results.to_csv('analysis.csv')
 
-    Notes:
-        The analyzer expects molecules containing exactly two pyrene
-        ring systems connected by a bridge. Each pyrene should have
-        16 carbon atoms in its aromatic core.
+        >>> # Use a different system
+        >>> analyzer = AromaticDimerAnalyzer(aromatic_system="perylene")
+
+        >>> # Use custom SMARTS
+        >>> analyzer = AromaticDimerAnalyzer(custom_smarts="c1cc2ccc3cccc4ccc(c1)c2c34")
     """
 
     def __init__(
-        self, verbose: bool = True, use_smarts: bool = True, use_shapely: bool = True
+        self,
+        aromatic_system: str = "pyrene",
+        verbose: bool = True,
+        use_smarts: bool = True,
+        use_shapely: bool = True,
+        custom_smarts: Optional[str] = None,
+        custom_thresholds: Optional[ClassificationThresholds] = None,
+        distance_calibration: Optional[DistanceCalibration] = None,
     ):
         """
-        Initialize the PyreneDimerAnalyzer.
+        Initialize the AromaticDimerAnalyzer.
 
         Args:
+            aromatic_system: Name of the aromatic system to analyze.
+                Supported: "pyrene", "perylene", "anthracene",
+                "naphthalene", "phenanthrene". Default: "pyrene".
             verbose: If True, print progress messages during analysis.
-            use_smarts: If True, use SMARTS patterns for pyrene detection.
+            use_smarts: If True, use SMARTS patterns for ring detection.
                         If False, use connectivity-based clustering.
             use_shapely: If True, use Shapely library for accurate π-overlap
                          calculation. If False, use centroid-based approximation.
+            custom_smarts: Optional custom SMARTS pattern. If provided,
+                overrides the system's default SMARTS.
+            custom_thresholds: Optional custom classification thresholds.
+                If provided with custom_smarts, uses these thresholds.
+                Otherwise falls back to the selected system's thresholds.
+            distance_calibration: Optional distance calibration to apply
+                to inter-plane distances. Use :func:`make_offset_calibration`
+                to create a simple offset correction.
         """
         self.verbose = verbose
         self.use_smarts = use_smarts
         self.use_shapely = use_shapely
+        self._distance_calibration = distance_calibration
 
-        # Compile SMARTS patterns
-        self._pyrene_pattern = Chem.MolFromSmarts(PYRENE_SMARTS)
+        # Load system definition from registry
+        if custom_smarts is not None:
+            self._system_name = "custom"
+            self._smarts = custom_smarts
+            self._pattern = Chem.MolFromSmarts(custom_smarts)
+            if custom_thresholds is not None:
+                self._thresholds = custom_thresholds
+            else:
+                self._thresholds = get_system("pyrene").thresholds
+            self._min_ring_atoms = 6
+        else:
+            system = get_system(aromatic_system)
+            self._system_name = system.name
+            self._smarts = system.smarts
+            self._pattern = Chem.MolFromSmarts(system.smarts)
+            self._thresholds = system.thresholds
+            self._min_ring_atoms = system.min_ring_atoms
+
+        # Backward-compatible attributes
+        self._pyrene_pattern = self._pattern
         self._fused_pattern = Chem.MolFromSmarts(FUSED_AROMATIC_SMARTS)
 
     def log(self, message: str) -> None:
@@ -91,40 +142,62 @@ class PyreneDimerAnalyzer:
         if self.verbose:
             print(f"[INFO] {message}")
 
-    def identify_pyrene_rings(self, mol: Chem.Mol) -> Tuple[List[int], List[int]]:
+    def identify_aromatic_rings(self, mol: Chem.Mol) -> Tuple[List[int], List[int]]:
         """
-        Identify atoms belonging to each pyrene ring system.
+        Identify atoms belonging to each aromatic ring system.
 
         This method uses two strategies:
-        1. SMARTS pattern matching for pyrene substructure
-        2. Connectivity-based clustering of aromatic rings
+        1. SMARTS pattern matching for the configured aromatic substructure
+        2. Connectivity-based clustering of aromatic rings (fallback)
 
         Args:
             mol: RDKit molecule object.
 
         Returns:
-            Tuple of two lists containing atom indices for each pyrene.
+            Tuple of two lists containing atom indices for each aromatic system.
 
         Raises:
-            ValueError: If two pyrene systems cannot be identified.
+            ValueError: If two aromatic systems cannot be identified.
 
         Example:
-            >>> pyrene1, pyrene2 = analyzer.identify_pyrene_rings(mol)
-            >>> print(f"Pyrene 1: {len(pyrene1)} atoms")
+            >>> ring1, ring2 = analyzer.identify_aromatic_rings(mol)
+            >>> print(f"Ring system 1: {len(ring1)} atoms")
         """
-        self.log("Identifying pyrene ring systems...")
+        self.log(f"Identifying {self._system_name} ring systems...")
 
         # Try SMARTS-based detection first
-        if self.use_smarts and self._pyrene_pattern is not None:
-            matches = mol.GetSubstructMatches(self._pyrene_pattern)
+        if self.use_smarts and self._pattern is not None:
+            matches = [set(m) for m in mol.GetSubstructMatches(self._pattern)]
             if len(matches) >= 2:
-                pyrene1 = sorted(list(matches[0]))
-                pyrene2 = sorted(list(matches[1]))
-                self.log("Found 2 pyrene systems via SMARTS matching")
-                return pyrene1, pyrene2
+                clusters = self._merge_connected_rings(matches)
+                clusters = [c for c in clusters if len(c) >= self._min_ring_atoms]
+
+                if len(clusters) >= 2:
+                    clusters = sorted(clusters, key=len, reverse=True)
+                    ring1 = sorted(list(clusters[0]))
+                    ring2 = sorted(list(clusters[1]))
+                    self.log(
+                        f"Found 2 {self._system_name} systems via SMARTS matching"
+                    )
+                    return ring1, ring2
 
         # Fallback to connectivity-based detection
         return self._identify_by_connectivity(mol)
+
+    def identify_pyrene_rings(self, mol: Chem.Mol) -> Tuple[List[int], List[int]]:
+        """
+        Identify atoms belonging to each pyrene ring system.
+
+        .. deprecated::
+            Use :meth:`identify_aromatic_rings` instead.
+
+        Args:
+            mol: RDKit molecule object.
+
+        Returns:
+            Tuple of two lists containing atom indices for each aromatic system.
+        """
+        return self.identify_aromatic_rings(mol)
 
     def _identify_by_connectivity(self, mol: Chem.Mol) -> Tuple[List[int], List[int]]:
         """
@@ -151,9 +224,8 @@ class PyreneDimerAnalyzer:
         # Merge connected rings into clusters
         clusters = self._merge_connected_rings(aromatic_rings)
 
-        # Filter clusters to only include pyrene-like systems (>= 10 atoms)
-        # Pyrene has 16 atoms, so we look for clusters with at least 10
-        pyrene_clusters = [c for c in clusters if len(c) >= 10]
+        # Filter clusters by minimum atom count for the configured system
+        pyrene_clusters = [c for c in clusters if len(c) >= self._min_ring_atoms]
 
         # If we don't have 2 pyrene-sized clusters, try with smaller threshold
         if len(pyrene_clusters) < 2:
@@ -385,10 +457,30 @@ class PyreneDimerAnalyzer:
 
         # Calculate geometric properties
         theta = calculate_plane_angle(coords1, coords2)
-        distance = calculate_interplane_distance(coords1, coords2)
+        raw_distance = calculate_interplane_distance(
+            coords1, coords2, plane_angle=theta, warn=False
+        )
+        if self._distance_calibration is not None:
+            distance = self._distance_calibration.apply(
+                raw_distance, plane_angle=theta
+            )
+        else:
+            distance = raw_distance
         overlap = calculate_pi_overlap(coords1, coords2, use_shapely=self.use_shapely)
         centroid_dist = calculate_centroid_distance(coords1, coords2)
         slip_stack = calculate_slip_stack_displacement(coords1, coords2)
+
+        # Build geometry warnings
+        geometry_warnings = []
+        if theta > self._thresholds.high_angle_warning:
+            geometry_warnings.append(
+                f"interplane_distance unreliable at angle {theta:.1f} deg "
+                f"(>{self._thresholds.high_angle_warning:.0f} deg)"
+            )
+        if theta > self._thresholds.high_angle_warning and distance < 2.0:
+            geometry_warnings.append(
+                "CRITICAL: likely measuring edge-to-face, not pi-pi distance"
+            )
 
         # Calculate bridge dihedrals
         phi_L = phi_R = None
@@ -409,7 +501,7 @@ class PyreneDimerAnalyzer:
         # Get energy
         energy = self._get_conformer_energy(mol, conf_id)
 
-        return {
+        result = {
             "conformer_id": conf_id,
             "plane_angle_deg": theta,
             "interplane_distance_A": distance,
@@ -419,7 +511,13 @@ class PyreneDimerAnalyzer:
             "bridge_dihedral_L_deg": phi_L,
             "bridge_dihedral_R_deg": phi_R,
             "energy_kcal_mol": energy,
+            "geometry_warnings": (
+                "; ".join(geometry_warnings) if geometry_warnings else None
+            ),
         }
+        if self._distance_calibration is not None:
+            result["raw_interplane_distance_A"] = raw_distance
+        return result
 
     def analyze_molecule(
         self, mol: Chem.Mol, mol_name: str = "molecule", show_progress: bool = True
@@ -443,8 +541,8 @@ class PyreneDimerAnalyzer:
         self.log(f"Analyzing: {mol_name}")
         self.log(f"{'='*60}")
 
-        # Identify pyrene rings (only once per molecule)
-        pyrene1, pyrene2 = self.identify_pyrene_rings(mol)
+        # Identify aromatic rings (only once per molecule)
+        pyrene1, pyrene2 = self.identify_aromatic_rings(mol)
 
         # Analyze each conformer
         results = []
@@ -453,8 +551,14 @@ class PyreneDimerAnalyzer:
         self.log(f"Processing {num_confs} conformers...")
 
         iterator = range(num_confs)
-        if show_progress and self.verbose:
-            iterator = tqdm(iterator, desc=f"Analyzing {mol_name}", unit="conf")
+        if show_progress:
+            print(f"Analyzing {mol_name}...", flush=True)
+            iterator = tqdm(
+                iterator,
+                desc=f"Analyzing {mol_name}",
+                unit="conf",
+                mininterval=0.1,
+            )
 
         for conf_id in iterator:
             conf_results = self.analyze_conformer(mol, conf_id, pyrene1, pyrene2)
@@ -480,6 +584,7 @@ class PyreneDimerAnalyzer:
             "bridge_dihedral_L_deg",
             "bridge_dihedral_R_deg",
             "energy_kcal_mol",
+            "geometry_warnings",
         ]
         if "rel_energy_kcal_mol" in df.columns:
             col_order.append("rel_energy_kcal_mol")
@@ -506,7 +611,7 @@ class PyreneDimerAnalyzer:
             f"{df['interplane_distance_A'].max():.2f} Å"
         )
         self.log(
-            f"  π-overlap range: {df['pi_overlap_pct'].min():.1f} - "
+            f"  pi-overlap range: {df['pi_overlap_pct'].min():.1f} - "
             f"{df['pi_overlap_pct'].max():.1f}%"
         )
 
@@ -536,7 +641,12 @@ class PyreneDimerAnalyzer:
             >>> results = analyzer.analyze_file('conformers.sdf')
             >>> results.to_csv('analysis.csv')
         """
+        if show_progress:
+            print("Running analysis...", flush=True)
+            print(f"Loading molecules from {filename}...", flush=True)
         molecules = load_molecules(filename)
+        if show_progress:
+            print(f"Loaded {len(molecules)} molecule(s).", flush=True)
 
         all_results = []
         for mol, name in molecules:
@@ -580,8 +690,13 @@ class PyreneDimerAnalyzer:
         if n_jobs == 1:
             # Sequential processing
             iterator = filenames
-            if show_progress and self.verbose:
-                iterator = tqdm(filenames, desc="Processing files", unit="file")
+            if show_progress:
+                iterator = tqdm(
+                    filenames,
+                    desc="Processing files",
+                    unit="file",
+                    mininterval=0.1,
+                )
 
             for filename in iterator:
                 try:
@@ -600,12 +715,13 @@ class PyreneDimerAnalyzer:
                 }
 
                 iterator = as_completed(futures)
-                if show_progress and self.verbose:
+                if show_progress:
                     iterator = tqdm(
                         iterator,
                         total=len(filenames),
                         desc="Processing files",
                         unit="file",
+                        mininterval=0.1,
                     )
 
                 for future in iterator:
@@ -624,9 +740,23 @@ class PyreneDimerAnalyzer:
     def _analyze_file_worker(self, filename: Union[str, Path]) -> pd.DataFrame:
         """Worker function for parallel file processing."""
         # Create new analyzer instance for worker
-        analyzer = PyreneDimerAnalyzer(
-            verbose=False, use_smarts=self.use_smarts, use_shapely=self.use_shapely
-        )
+        if self._system_name == "custom":
+            analyzer = AromaticDimerAnalyzer(
+                verbose=False,
+                use_smarts=self.use_smarts,
+                use_shapely=self.use_shapely,
+                custom_smarts=self._smarts,
+                custom_thresholds=self._thresholds,
+                distance_calibration=self._distance_calibration,
+            )
+        else:
+            analyzer = AromaticDimerAnalyzer(
+                aromatic_system=self._system_name,
+                verbose=False,
+                use_smarts=self.use_smarts,
+                use_shapely=self.use_shapely,
+                distance_calibration=self._distance_calibration,
+            )
         return analyzer.analyze_file(filename, show_progress=False)
 
     def classify_conformer(
@@ -634,6 +764,8 @@ class PyreneDimerAnalyzer:
     ) -> str:
         """
         Classify a conformer based on its geometric properties.
+
+        Uses the classification thresholds for the configured aromatic system.
 
         Args:
             plane_angle: Plane-plane angle in degrees.
@@ -644,39 +776,194 @@ class PyreneDimerAnalyzer:
             Classification string: 'strong_excimer', 'weak_excimer', or 'monomer'.
 
         Example:
-            >>> classification = analyzer.classify_conformer(15.0, 3.5, 75.0)
+            >>> classification = analyzer.classify_conformer(15.0, 3.5, 55.0)
             >>> print(classification)  # 'strong_excimer'
 
         Notes:
-            Classification criteria based on literature:
-            - Strong excimer: θ < 20°, d = 3.3-3.7 Å, overlap > 70%
-            - Weak excimer: θ = 20-60°, d = 3.7-4.5 Å, overlap = 30-70%
-            - Monomer: θ > 60°, d > 4.5 Å, or overlap < 30%
-        """
-        if plane_angle < 20 and 3.3 <= distance <= 3.7 and overlap > 70:
-            return "strong_excimer"
-        elif plane_angle < 60 and distance < 4.5 and overlap > 30:
-            return "weak_excimer"
-        else:
-            return "monomer"
+            Thresholds are system-specific. For pyrene (default):
+            - Strong excimer: θ < 20°, d = 3.3-3.7 Å, overlap > 50%
+            - Weak excimer: θ < 60°, d < 4.5 Å, overlap > 30%
+            - Monomer: otherwise
 
-    def add_classification(self, df: pd.DataFrame) -> pd.DataFrame:
+            The strong overlap threshold was lowered from 70% to 50%
+            based on Ge et al. 2020 and Basuroy et al. 2021.
+
+            Eclipsed conformers (θ < 5°) are flagged with a warning
+            because they may be optically dark (zero oscillator strength).
+
+        References:
+            - Ge et al. 2020 J. Mater. Chem. C 8, 10223 (overlap 40-80%)
+            - Basuroy et al. 2021 J. Chem. Phys. 155, 234304 (42% = excimer)
+            - Dai et al. 2024 Molecules 29, 507 (dark eclipsed excimer)
         """
-        Add excimer/monomer classification to analysis results.
+        t = self._thresholds
+        d_min, d_max = t.strong_distance_range
+
+        if (
+            plane_angle < t.strong_angle_max
+            and d_min <= distance <= d_max
+            and overlap > t.strong_overlap_min
+        ):
+            classification = "strong_excimer"
+        elif (
+            plane_angle < t.weak_angle_max
+            and distance < t.weak_distance_max
+            and overlap > t.weak_overlap_min
+        ):
+            classification = "weak_excimer"
+        else:
+            classification = "monomer"
+
+        # Dark excimer warning: eclipsed geometry may have zero oscillator
+        # strength (optically dark). Dai et al. 2024 Molecules 29, 507.
+        if classification in ("strong_excimer", "weak_excimer") and plane_angle < 5.0:
+            warnings.warn(
+                f"Eclipsed excimer (θ={plane_angle:.1f}°) may be optically dark. "
+                f"See Dai et al. 2024 Molecules 29, 507.",
+                stacklevel=2,
+            )
+
+        return classification
+
+    def score_conformer(
+        self,
+        plane_angle: float,
+        distance: float,
+        overlap: float,
+        slip_stack: Optional[float] = None,
+    ) -> float:
+        """
+        Compute a heuristic excimer-likeness score in [0, 1].
+
+        The score emphasizes π-overlap, then distance and angle. A slip-stack
+        penalty is applied when available. This is a ranking aid and does not
+        replace classification.
+
+        Args:
+            plane_angle: Plane-plane angle in degrees.
+            distance: Inter-plane distance in Angstroms.
+            overlap: π-overlap percentage.
+            slip_stack: Optional slip-stack displacement in Angstroms.
+
+        Returns:
+            Score between 0.0 (unlikely excimer) and 1.0 (strong excimer-like).
+        """
+        t = self._thresholds
+        d_min, d_max = t.strong_distance_range
+
+        # Overlap is the primary driver (Ge 2020)
+        overlap_score = float(np.clip(overlap / 100.0, 0.0, 1.0))
+
+        # Distance score: peak in strong range, taper to 0 by weak max
+        if distance <= 0 or np.isnan(distance):
+            distance_score = 0.0
+        elif d_min <= distance <= d_max:
+            distance_score = 1.0
+        elif distance < d_min:
+            distance_score = max(0.0, 1.0 - (d_min - distance) / d_min)
+        elif distance < t.weak_distance_max:
+            distance_score = max(
+                0.0, 1.0 - (distance - d_max) / (t.weak_distance_max - d_max)
+            )
+        else:
+            distance_score = 0.0
+
+        # Angle score: strong range best, taper to 0 by weak max
+        if plane_angle < 0 or np.isnan(plane_angle):
+            angle_score = 0.0
+        elif plane_angle <= t.strong_angle_max:
+            angle_score = 1.0
+        elif plane_angle <= t.weak_angle_max:
+            angle_score = max(
+                0.0,
+                1.0
+                - (plane_angle - t.strong_angle_max)
+                / (t.weak_angle_max - t.strong_angle_max),
+            )
+        else:
+            angle_score = 0.0
+
+        # Slip-stack penalty (optional)
+        if slip_stack is None or np.isnan(slip_stack):
+            slip_score = 1.0
+        elif slip_stack <= 2.5:
+            slip_score = 1.0
+        elif slip_stack <= 7.5:
+            slip_score = max(0.0, 1.0 - (slip_stack - 2.5) / 5.0)
+        else:
+            slip_score = 0.0
+
+        # Eclipsed penalty: near-0° conformers may be optically dark
+        # (Dai et al. 2024 Molecules 29, 507). Penalize θ < 10° with a
+        # Gaussian dip centered at 0°; the emissive sweet-spot is 10-50°.
+        if plane_angle < 10.0 and not (np.isnan(plane_angle) or plane_angle < 0):
+            eclipsed_factor = 1.0 - 0.5 * np.exp(
+                -(plane_angle**2) / (2 * 10.0**2)
+            )
+        else:
+            eclipsed_factor = 1.0
+
+        base_score = 0.6 * overlap_score + 0.2 * distance_score + 0.2 * angle_score
+        return float(np.clip(base_score * slip_score * eclipsed_factor, 0.0, 1.0))
+
+    def add_excimer_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add heuristic excimer score to analysis results.
 
         Args:
             df: DataFrame with analysis results.
 
         Returns:
-            DataFrame with added 'classification' column.
+            DataFrame with added 'excimer_score' column.
         """
         df = df.copy()
-        df["classification"] = df.apply(
-            lambda row: self.classify_conformer(
+        df["excimer_score"] = df.apply(
+            lambda row: self.score_conformer(
                 row["plane_angle_deg"],
                 row["interplane_distance_A"],
                 row["pi_overlap_pct"],
+                row.get("slip_stack_A"),
             ),
             axis=1,
         )
         return df
+
+    def add_classification(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add excimer/monomer classification to analysis results.
+
+        Also adds 'dark_excimer_warning' boolean column for eclipsed
+        conformers (θ < 5°) that may be optically dark.
+
+        Args:
+            df: DataFrame with analysis results.
+
+        Returns:
+            DataFrame with added 'classification' and 'dark_excimer_warning' columns.
+
+        References:
+            - Dai et al. 2024 Molecules 29, 507 (eclipsed excimer = dark)
+        """
+        df = df.copy()
+        classifications = []
+        dark_warnings = []
+        for _, row in df.iterrows():
+            angle = row["plane_angle_deg"]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                cls = self.classify_conformer(
+                    angle,
+                    row["interplane_distance_A"],
+                    row["pi_overlap_pct"],
+                )
+            classifications.append(cls)
+            # Flag eclipsed excimers as potentially dark
+            is_dark = cls in ("strong_excimer", "weak_excimer") and angle < 5.0
+            dark_warnings.append(is_dark)
+        df["classification"] = classifications
+        df["dark_excimer_warning"] = dark_warnings
+        return df
+
+
+# Backward-compatible alias
+PyreneDimerAnalyzer = AromaticDimerAnalyzer

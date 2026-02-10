@@ -1,0 +1,59 @@
+#svl
+
+function main []
+    // Export Et to SDF
+    local db = db_Open ['Dimer_Et_conformers.mdb', 'read'];
+    local entries = db_Entries db;
+    write ['Et: {} entries\n', length entries];
+
+    local i, entry_key;
+    local fh = fopenw 'Dimer_Et_conformers.sdf';
+
+    for i = 1, length entries loop
+        entry_key = entries(i);
+        local mol_data = db_ReadFields [db, entry_key, 'mol'];
+        local chains = mol_Create first mol_data;
+        local atoms = cat cAtoms chains;
+        local names = aName atoms;
+        local elements = aElement atoms;
+        local pos = aPos atoms;
+        local nAtoms = length atoms;
+
+        // Write SDF header
+        fwrite [fh, 'Et_conf_{}\n', i];
+        fwrite [fh, '     RDKit          3D\n'];
+        fwrite [fh, '\n'];
+
+        // Counts line
+        local bonds = cat cBonds chains;
+        local nBonds = length bonds;
+        fwrite [fh, '{n:3}{n:3}  0  0  0  0  0  0  0  0999 V2000\n', nAtoms, nBonds];
+
+        // Atom block
+        local j;
+        for j = 1, nAtoms loop
+            local xyz = pos(j);
+            fwrite [fh, '{n:10.4f}{n:10.4f}{n:10.4f} {t:-3}0  0  0  0  0  0  0  0  0  0  0  0\n',
+                xyz(1), xyz(2), xyz(3), elements(j)];
+        endloop
+
+        // Bond block
+        for j = 1, nBonds loop
+            local bond = bonds(j);
+            local a1 = indexof [aBonds bond(1), atoms];
+            local a2 = indexof [aBonds bond(2), atoms];
+            // Simplified: get bond atoms
+        endloop
+
+        fwrite [fh, 'M  END\n'];
+        fwrite [fh, '$$$$\n'];
+
+        mol_Destroy chains;
+    endloop
+
+    fclose fh;
+    write ['Exported Et SDF\n'];
+    db_Close db;
+
+    write ['Done!\n'];
+endfunction

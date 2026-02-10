@@ -1,0 +1,77 @@
+#svl
+
+function main []
+    // Export Et conformer properties
+    local db = db_Open ['Dimer_Et_conformers.mdb', 'read'];
+    local entries = db_Entries db;
+    local fields = db_Fields db;
+
+    write ['Et database fields: {}\n', fields];
+    write ['Et conformers: {}\n', length entries];
+
+    // Read all numeric property columns
+    local E = db_ReadColumn [db, 'E'];
+    local dE = db_ReadColumn [db, 'dE'];
+    local mseq = db_ReadColumn [db, 'mseq'];
+    local chi = db_ReadColumn [db, 'chi'];
+    local rgyr = db_ReadColumn [db, 'rgyr'];
+    local glob = db_ReadColumn [db, 'glob'];
+    local ecc = db_ReadColumn [db, 'ecc'];
+
+    write ['Et energy range: {} to {} kcal/mol\n', min E, max E];
+    write ['Et dE range: {} to {} kcal/mol\n', min dE, max dE];
+
+    // Write CSV
+    local fh = fopenw 'Et_moe_data.csv';
+    fwrite [fh, 'conformer_id,E_kcal_mol,dE_kcal_mol,mseq,chi,rgyr,glob,ecc\n'];
+    local i;
+    for i = 1, length entries loop
+        fwrite [fh, '{},{},{},{},{},{},{},{}\n',
+            i, E(i), dE(i), mseq(i), chi(i), rgyr(i), glob(i), ecc(i)];
+    endloop
+    fclose fh;
+    write ['Exported Et_moe_data.csv\n'];
+
+    // Export molecules to SDF one at a time
+    local entry_key;
+    for i = 1, length entries loop
+        entry_key = entries(i);
+        db_EnsureField [db, 'mol', 'molecule'];
+        local mol_data = first db_ReadFields [db, entry_key, 'mol'];
+        local chains = mol_Create mol_data;
+    endloop
+
+    db_Close db;
+
+    // Export iPr conformer properties
+    db = db_Open ['iPr_conformers.mdb', 'read'];
+    entries = db_Entries db;
+    fields = db_Fields db;
+
+    write ['iPr database fields: {}\n', fields];
+    write ['iPr conformers: {}\n', length entries];
+
+    E = db_ReadColumn [db, 'E'];
+    dE = db_ReadColumn [db, 'dE'];
+    mseq = db_ReadColumn [db, 'mseq'];
+    chi = db_ReadColumn [db, 'chi'];
+    rgyr = db_ReadColumn [db, 'rgyr'];
+    glob = db_ReadColumn [db, 'glob'];
+    ecc = db_ReadColumn [db, 'ecc'];
+
+    write ['iPr energy range: {} to {} kcal/mol\n', min E, max E];
+    write ['iPr dE range: {} to {} kcal/mol\n', min dE, max dE];
+
+    fh = fopenw 'iPr_moe_data.csv';
+    fwrite [fh, 'conformer_id,E_kcal_mol,dE_kcal_mol,mseq,chi,rgyr,glob,ecc\n'];
+    for i = 1, length entries loop
+        fwrite [fh, '{},{},{},{},{},{},{},{}\n',
+            i, E(i), dE(i), mseq(i), chi(i), rgyr(i), glob(i), ecc(i)];
+    endloop
+    fclose fh;
+    write ['Exported iPr_moe_data.csv\n'];
+
+    db_Close db;
+    write ['Done! CSV files exported.\n'];
+    write ['NOTE: Please export SDF from MOE GUI: File > Save As > SDF format\n'];
+endfunction

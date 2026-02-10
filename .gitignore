@@ -69,6 +69,7 @@ docs/_build/
 # Environments
 .env
 .venv
+.venv-wsl/
 venv/
 ENV/
 env/
@@ -80,4 +81,32 @@ env/
 # OS-specific
 .DS_Store
 Thumbs.db
+nul
 .github/workflows/
+
+# Generated output
+plots/
+results.csv
+test_results.csv
+validation_results.csv
+tmp_diag_*.csv
+tmp_diag_*.txt
+*_all_conformers.csv
+*_summary.csv
+*_boltzmann_*K.csv
+*_ensemble_features.csv
+*_ranking_table.csv
+*_analyzed.csv
+*_coords.csv
+*_data.csv
+
+# Tool configs
+.claude/
+.serena/
+.venv-1/
+
+# Local binaries and vendor tools
+bin/micromamba
+
+# Optional proprietary or bulky intermediates
+*.mdb

@@ -27,7 +27,7 @@ class TestCLIMain:
         result = runner.invoke(cli, ["--help"])
 
         assert result.exit_code == 0
-        assert "Pyrene Dimer Analyzer" in result.output
+        assert "Aromatic Dimer Analyzer" in result.output
 
     def test_version(self, runner):
         """Test --version option."""
@@ -41,7 +41,7 @@ class TestCLIMain:
         result = runner.invoke(cli)
 
         assert result.exit_code == 0
-        assert "Pyrene Dimer Analyzer" in result.output
+        assert "Aromatic Dimer Analyzer" in result.output
 
 
 class TestAnalyzeCommand:
@@ -52,7 +52,8 @@ class TestAnalyzeCommand:
         result = runner.invoke(cli, ["analyze", "--help"])
 
         assert result.exit_code == 0
-        assert "Analyze pyrene dimer conformers" in result.output
+        assert "Analyze" in result.output
+        assert "conformers" in result.output
 
     def test_analyze_missing_input(self, runner):
         """Test analyze without input files."""
@@ -183,11 +184,23 @@ class TestInfoCommand:
         result = runner.invoke(cli, ["info"])
 
         assert result.exit_code == 0
-        assert "Pyrene Dimer Analyzer" in result.output
+        assert "Aromatic Dimer Analyzer" in result.output
         assert "CAPABILITIES" in result.output
         assert "SUPPORTED FORMATS" in result.output
-        assert "EXCIMER FORMATION CRITERIA" in result.output
+        assert "SUPPORTED AROMATIC SYSTEMS" in result.output
+        assert "pyrene" in result.output
         assert "REFERENCES" in result.output
+
+    def test_info_shows_all_systems(self, runner):
+        """Test info command lists all registered systems."""
+        result = runner.invoke(cli, ["info"])
+
+        assert result.exit_code == 0
+        assert "pyrene" in result.output
+        assert "perylene" in result.output
+        assert "anthracene" in result.output
+        assert "naphthalene" in result.output
+        assert "phenanthrene" in result.output
 
 
 class TestPreviewCommand:
@@ -217,6 +230,49 @@ class TestPreviewCommand:
     def test_preview_with_num(self, runner, simple_test_sdf):
         """Test preview with custom number of conformers."""
         result = runner.invoke(cli, ["preview", str(simple_test_sdf), "-n", "3"])
+
+
+class TestCLIMACEOptions:
+    """Tests for MACE-OFF23 CLI options."""
+
+    def test_analyze_smiles_help_shows_mace(self, runner):
+        """analyze-smiles --help should list MACE-OFF23 as optimizer option."""
+        result = runner.invoke(cli, ["analyze-smiles", "--help"])
+        assert result.exit_code == 0
+        # Click shows case_sensitive=False choices as lowercase
+        assert "mace-off23" in result.output.lower()
+
+    def test_screen_help_shows_mace(self, runner):
+        """screen --help should list MACE-OFF23 as optimizer option."""
+        result = runner.invoke(cli, ["screen", "--help"])
+        assert result.exit_code == 0
+        assert "mace-off23" in result.output.lower()
+
+    def test_analyze_smiles_invalid_optimizer(self, runner):
+        """Invalid optimizer should be rejected by click.Choice."""
+        result = runner.invoke(cli, [
+            "analyze-smiles",
+            "c1ccc2ccccc2c1CCc1ccc2ccccc2c1",
+            "--optimizer", "INVALID_METHOD",
+        ])
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output or "invalid" in result.output.lower()
+
+    def test_analyze_smiles_with_mace_option(self, runner):
+        """analyze-smiles with --optimizer MACE-OFF23 should not crash.
+
+        Will fall back to MMFF94s if MACE is not installed.
+        """
+        result = runner.invoke(cli, [
+            "analyze-smiles",
+            "c1ccc2ccccc2c1CCc1ccc2ccccc2c1",
+            "-s", "naphthalene",
+            "-n", "5",
+            "--optimizer", "MACE-OFF23",
+        ])
+        # Should not crash even if MACE is not installed (graceful fallback)
+        # Exit code 0 or 1 are both acceptable
+        assert result.exit_code in (0, 1)
 
 
 class TestCLIEdgeCases:

@@ -10,10 +10,13 @@ Tests cover:
 - Slip-stack displacement calculations
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
 from pyrene_analyzer.geometry import (
+    DistanceCalibration,
     _create_projection_basis,
     _project_to_2d,
     calculate_centroid_distance,
@@ -23,6 +26,7 @@ from pyrene_analyzer.geometry import (
     calculate_slip_stack_displacement,
     calculate_tilt_angle,
     fit_plane_svd,
+    make_offset_calibration,
 )
 
 
@@ -199,6 +203,40 @@ class TestCalculateInterplaneDistance:
             distance = calculate_interplane_distance(coords1, coords2)
             assert distance >= 0
 
+    def test_warns_at_high_angle(self, sample_coords_parallel):
+        """Should warn when plane_angle > 60 degrees."""
+        coords1, coords2 = sample_coords_parallel
+        with pytest.warns(UserWarning, match="unreliable"):
+            calculate_interplane_distance(coords1, coords2, plane_angle=75.0)
+
+    def test_no_warn_at_low_angle(self, sample_coords_parallel):
+        """Should NOT warn when plane_angle <= 60 degrees."""
+        coords1, coords2 = sample_coords_parallel
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # This should not raise any warnings
+            calculate_interplane_distance(coords1, coords2, plane_angle=30.0)
+
+    def test_no_warn_when_angle_none(self, sample_coords_parallel):
+        """Should NOT warn when plane_angle is None (backward compat)."""
+        coords1, coords2 = sample_coords_parallel
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            calculate_interplane_distance(coords1, coords2)
+
+    def test_warn_at_boundary(self, sample_coords_parallel):
+        """Should NOT warn at exactly 60 degrees (boundary)."""
+        coords1, coords2 = sample_coords_parallel
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            calculate_interplane_distance(coords1, coords2, plane_angle=60.0)
+
+    def test_warn_just_above_boundary(self, sample_coords_parallel):
+        """Should warn just above 60 degrees."""
+        coords1, coords2 = sample_coords_parallel
+        with pytest.warns(UserWarning, match="unreliable"):
+            calculate_interplane_distance(coords1, coords2, plane_angle=60.1)
+
 
 class TestCalculateCentroidDistance:
     """Tests for calculate_centroid_distance function."""
@@ -349,3 +387,65 @@ class TestCalculateTiltAngle:
             coords2 = np.random.randn(5, 3)
             tilt = calculate_tilt_angle(coords1, coords2)
             assert 0 <= tilt <= 180
+
+
+class TestDistanceCalibration:
+    """Tests for DistanceCalibration dataclass and make_offset_calibration."""
+
+    def test_offset_calibration(self):
+        """Simple offset should subtract from distance."""
+        cal = make_offset_calibration(-0.7)
+        assert cal.apply(4.2) == pytest.approx(3.5)
+
+    def test_offset_calibration_default(self):
+        """Default offset is -0.7."""
+        cal = make_offset_calibration()
+        assert cal.intercept == -0.7
+
+    def test_floor_at_zero(self):
+        """Corrected distance should never be negative."""
+        cal = make_offset_calibration(-10.0)
+        assert cal.apply(3.0) == 0.0
+
+    def test_no_calibration_identity(self):
+        """Default DistanceCalibration should be identity."""
+        cal = DistanceCalibration()
+        assert cal.apply(4.2) == pytest.approx(4.2)
+
+    def test_slope_and_intercept(self):
+        """slope * distance + intercept should work."""
+        cal = DistanceCalibration(slope=0.9, intercept=-0.3)
+        expected = 0.9 * 5.0 - 0.3
+        assert cal.apply(5.0) == pytest.approx(expected)
+
+    def test_angle_bins_inside(self):
+        """Correction should apply when angle is within bins."""
+        cal = DistanceCalibration(intercept=-1.0, angle_bins=(0.0, 30.0))
+        assert cal.apply(4.0, plane_angle=15.0) == pytest.approx(3.0)
+
+    def test_angle_bins_outside(self):
+        """Correction should NOT apply when angle is outside bins."""
+        cal = DistanceCalibration(intercept=-1.0, angle_bins=(0.0, 30.0))
+        assert cal.apply(4.0, plane_angle=45.0) == pytest.approx(4.0)
+
+    def test_angle_bins_boundary(self):
+        """Correction should apply at bin boundaries (inclusive)."""
+        cal = DistanceCalibration(intercept=-1.0, angle_bins=(0.0, 30.0))
+        assert cal.apply(4.0, plane_angle=0.0) == pytest.approx(3.0)
+        assert cal.apply(4.0, plane_angle=30.0) == pytest.approx(3.0)
+
+    def test_frozen(self):
+        """DistanceCalibration should be frozen (immutable)."""
+        cal = make_offset_calibration(-0.7)
+        with pytest.raises(AttributeError):
+            cal.slope = 2.0
+
+    def test_source_label(self):
+        """Source label should be stored."""
+        cal = make_offset_calibration(-0.5, source="test calibration")
+        assert cal.source == "test calibration"
+
+    def test_factory_source_default(self):
+        """Factory should set default source."""
+        cal = make_offset_calibration()
+        assert "MMFF94s" in cal.source

@@ -1,0 +1,5 @@
+molecule,conformer_id,plane_angle_deg,interplane_distance_A,pi_overlap_pct,centroid_distance_A,slip_stack_A,bridge_dihedral_L_deg,bridge_dihedral_R_deg,energy_kcal_mol,geometry_warnings
+Dimer_pyrene2x_R2x_Et_each_pyrene,0,66.83963981802223,1.1742931752594155,0.0,7.860545806670516,7.772336580289392,118.76310138941855,,,"interplane_distance unreliable at angle 66.8 deg (>60 deg); CRITICAL: likely measuring edge-to-face, not pi-pi distance"
+Dimer_pyrene2x_R2x_iPr_each_pyrene,0,8.958666302862785,3.5095496417212964,37.69926904473586,4.560887968252522,2.912861200133735,119.67020123727566,,,
+Dimer_pyrene2x_R2x_cHex_each_pyrene,0,52.18297073793422,1.9698920431924745,0.0,7.59108975174672,7.331041464706161,-119.34518017666299,148.14885578444935,,
+Dimer_pyrene2x_R2x_tBu_each_pyrene,0,86.26253935472614,0.521224776546036,0.0,8.43633631927654,8.420219428510102,-130.09727734218674,-37.69572315594258,,"interplane_distance unreliable at angle 86.3 deg (>60 deg); CRITICAL: likely measuring edge-to-face, not pi-pi distance"

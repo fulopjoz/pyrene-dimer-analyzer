@@ -1,0 +1,272 @@
+#svl
+//=============================================================================
+// MOE Batch Conformer Search Script
+//=============================================================================
+//
+// Purpose: Automated conformer search for all 64 binaphthalene dimers
+//
+// Usage in MOE:
+//   1. Open SVL Commands window (MOE | SVL | Commands)
+//   2. Click "Load" and select this file
+//   3. Type: batch_conformer_search []
+//   4. Script will process all 64 SDF files in moe_import/
+//
+// Parameters optimized for large dimers (100-150 atoms):
+//   - Method: LowModeMD
+//   - Temperature: 600 K (not 300 - needed for barrier crossing)
+//   - Iteration Limit: 10000
+//   - Rejection Limit: 500 (not 100)
+//   - RMSD Limit: 0.25 A
+//   - Energy Window: 10 kcal/mol
+//   - Conformation Limit: 200
+//   - Forcefield: Amber:EHT
+//
+// Output: moe_conformers/{name}_conformers.mdb for each molecule
+//
+// Expected runtime: ~15-30 min per molecule = 16-32 hours total
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// Configuration functions (SVL doesn't allow global initialization)
+// These MUST be defined first as they are called by other functions
+//-----------------------------------------------------------------------------
+function get_lowmode_params []
+    return [
+        method:        'LowModeMD',
+        iteration:     10000,
+        rejection:     500,
+        rmsd:          0.25,
+        edelta:        10.0,
+        confs:         200,
+        temp:          600,
+        ff:            'Amber:EHT'
+    ];
+endfunction
+
+function get_input_dir []
+    return 'moe_import';
+endfunction
+
+function get_output_dir []
+    return 'moe_conformers';
+endfunction
+
+function get_priority_molecules []
+    return [
+        'EtynPyr_Me',
+        'EtynPyr_Et',
+        'EtynPyr_H',
+        'EtynPyr_iPr',
+        'CNPh_Th_tBu',
+        'CNPh_Th_Me',
+        'Pyr_Me',
+        'Pyr_H',
+        'DCV_Th_Me',
+        'DCV_Th_H'
+    ];
+endfunction
+
+//-----------------------------------------------------------------------------
+// Process a single molecule (must be defined BEFORE functions that call it)
+//-----------------------------------------------------------------------------
+function process_molecule [sdf_file, mdb_file, mol_name]
+    local PARAMS = get_lowmode_params [];
+
+    // Clear workspace
+    mol_Destroy Atoms [];
+
+    // Read SDF file
+    write ['  Loading {}...\n', sdf_file];
+    local mol_data = ReadMOL sdf_file;
+
+    if mol_data === null then
+        write ['  ERROR: Could not read SDF file\n'];
+        return 0;
+    endif
+
+    // Create molecule in MOE
+    local chains = mol_Create mol_data;
+
+    if chains === null or length chains == 0 then
+        write ['  ERROR: Could not create molecule\n'];
+        return 0;
+    endif
+
+    local atoms = cat cAtoms chains;
+    write ['  Loaded {} atoms\n', length atoms];
+
+    // Run QuickPrep (protonation, partial charges)
+    write ['  Running QuickPrep...\n'];
+    run ['quickprep.svl', []];
+
+    // Set up conformer search parameters
+    write ['  Starting conformer search...\n'];
+
+    // Run LowModeMD conformer search
+    local conf_result = run ['confsearch.svl', [
+        method:      PARAMS.method,
+        iteration:   PARAMS.iteration,
+        rejection:   PARAMS.rejection,
+        rmsd:        PARAMS.rmsd,
+        edelta:      PARAMS.edelta,
+        confs:       PARAMS.confs,
+        temp:        PARAMS.temp,
+        outmdb:      mdb_file
+    ]];
+
+    // Count conformers in output
+    if ftype mdb_file == 'file' then
+        local db = db_Open [mdb_file, 'read'];
+        local n_confs = length db_Entries db;
+        db_Close db;
+        write ['  Generated {} conformers\n', n_confs];
+        return 1;
+    else
+        write ['  ERROR: Output file not created\n'];
+        return 0;
+    endif
+endfunction
+
+//-----------------------------------------------------------------------------
+// Process a subset of molecules
+//-----------------------------------------------------------------------------
+function batch_conformer_subset [mol_list]
+    local INPUT_DIR = get_input_dir [];
+    local OUTPUT_DIR = get_output_dir [];
+
+    write ['Processing {} molecules\n', length mol_list];
+
+    local i, mol_name, sdf_file, mdb_file;
+    local n_success = 0;
+
+    for i = 1, length mol_list loop
+        mol_name = mol_list(i);
+        sdf_file = tok_cat [INPUT_DIR, '/', mol_name, '_3D.sdf'];
+        mdb_file = tok_cat [OUTPUT_DIR, '/', mol_name, '_conformers.mdb'];
+
+        write ['\n[{}/{}] {}\n', i, length mol_list, mol_name];
+
+        if ftype sdf_file !== 'file' then
+            write ['  ERROR: Input file not found: {}\n', sdf_file];
+            continue;
+        endif
+
+        if process_molecule [sdf_file, mdb_file, mol_name] then
+            n_success = n_success + 1;
+        endif
+    endloop
+
+    return n_success;
+endfunction
+
+//-----------------------------------------------------------------------------
+// Main batch function - processes all 64 molecules
+//-----------------------------------------------------------------------------
+function batch_conformer_search []
+    local PARAMS = get_lowmode_params [];
+    local INPUT_DIR = get_input_dir [];
+    local OUTPUT_DIR = get_output_dir [];
+
+    write ['===========================================\n'];
+    write ['MOE BATCH CONFORMER SEARCH\n'];
+    write ['===========================================\n'];
+    write ['Input: {}/\n', INPUT_DIR];
+    write ['Output: {}/\n', OUTPUT_DIR];
+    write ['Parameters:\n'];
+    write ['  Method: {}\n', PARAMS.method];
+    write ['  Temperature: {} K\n', PARAMS.temp];
+    write ['  Iterations: {}\n', PARAMS.iteration];
+    write ['  Rejection: {}\n', PARAMS.rejection];
+    write ['  RMSD: {} A\n', PARAMS.rmsd];
+    write ['  Energy window: {} kcal/mol\n', PARAMS.edelta];
+    write ['  Max conformers: {}\n', PARAMS.confs];
+    write ['  Forcefield: {}\n', PARAMS.ff];
+    write ['===========================================\n\n'];
+
+    // Create output directory if needed
+    if not ftype OUTPUT_DIR == 'dir' then
+        fmkdir OUTPUT_DIR;
+    endif
+
+    // Get list of input SDF files
+    local files = flist [INPUT_DIR, '*_3D.sdf'];
+    write ['Found {} input files\n\n', length files];
+
+    if length files == 0 then
+        write ['ERROR: No *_3D.sdf files found in {}/\n', INPUT_DIR];
+        return [];
+    endif
+
+    // Process each file
+    local i, filename, basename, outfile;
+    local start_time, mol_time, total_time;
+    local n_success = 0;
+    local n_failed = 0;
+
+    start_time = clock [];
+
+    for i = 1, length files loop
+        filename = files(i);
+        basename = ftail fbase filename;
+        basename = token tok_drop [basename, -3];  // Remove _3D suffix
+        outfile = tok_cat [OUTPUT_DIR, '/', basename, '_conformers.mdb'];
+
+        write ['\n[{}/{}] {}\n', i, length files, basename];
+        write ['  Input: {}\n', filename];
+        write ['  Output: {}\n', outfile];
+
+        // Skip if output already exists
+        if ftype outfile == 'file' then
+            write ['  SKIPPED: Output already exists\n'];
+            n_success = n_success + 1;
+            continue;
+        endif
+
+        mol_time = clock [];
+
+        // Process this molecule
+        local result = process_molecule [filename, outfile, basename];
+
+        if result then
+            n_success = n_success + 1;
+            write ['  DONE in {} min\n', (clock[] - mol_time) / 60];
+        else
+            n_failed = n_failed + 1;
+            write ['  FAILED\n'];
+        endif
+    endloop
+
+    total_time = (clock [] - start_time) / 60;
+
+    write ['\n===========================================\n'];
+    write ['BATCH COMPLETE\n'];
+    write ['===========================================\n'];
+    write ['Successful: {}\n', n_success];
+    write ['Failed: {}\n', n_failed];
+    write ['Total time: {} min ({} hours)\n', total_time, total_time / 60];
+    write ['===========================================\n'];
+
+    return [n_success, n_failed];
+endfunction
+
+//-----------------------------------------------------------------------------
+// Priority list batch function
+//-----------------------------------------------------------------------------
+function batch_priority []
+    local PRIORITY = get_priority_molecules [];
+    return batch_conformer_subset PRIORITY;
+endfunction
+
+//-----------------------------------------------------------------------------
+// Help function
+//-----------------------------------------------------------------------------
+function batch_help []
+    write ['MOE Batch Conformer Search Commands:\n'];
+    write ['  batch_conformer_search []     - Process all 64 molecules\n'];
+    write ['  batch_priority []             - Process top 10 priority molecules\n'];
+    write ['  batch_conformer_subset [list] - Process specific molecule list\n'];
+    write ['  batch_help []                 - Show this help\n'];
+    write ['\n'];
+    write ['Example:\n'];
+    write ['  batch_conformer_subset ["EtynPyr_Me", "EtynPyr_Et", "Pyr_H"]\n'];
+endfunction

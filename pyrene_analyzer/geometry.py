@@ -15,7 +15,9 @@ This module provides core geometric calculations including:
 All functions are designed to work with numpy arrays of 3D coordinates.
 """
 
-from typing import Tuple
+import warnings
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.spatial import ConvexHull
@@ -23,11 +25,86 @@ from scipy.spatial import ConvexHull
 # Try to import Shapely for accurate polygon intersection
 try:
     from shapely.geometry import Polygon
+    from shapely.ops import unary_union
     from shapely.validation import make_valid
 
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
+
+
+@dataclass(frozen=True)
+class DistanceCalibration:
+    """Calibration for correcting systematic inter-plane distance bias.
+
+    Different force fields produce systematically different inter-plane
+    distances. For example, MMFF94s (RDKit) yields distances ~0.6-0.8 A
+    longer than Amber10:EHT (MOE) for aromatic dimers.
+
+    This dataclass holds the linear correction parameters:
+        corrected = slope * raw_distance + intercept
+
+    If ``angle_bins`` is set, the correction is only applied when the
+    plane angle falls within the specified range.
+
+    Attributes:
+        slope: Multiplicative factor (default 1.0 for pure offset).
+        intercept: Additive offset in Angstroms (e.g., -0.7).
+        angle_bins: Optional (min, max) angle range in degrees.
+            If provided, correction is only applied when the plane
+            angle falls within this range. If None, always applied.
+        source: Human-readable label describing the calibration origin.
+    """
+
+    slope: float = 1.0
+    intercept: float = 0.0
+    angle_bins: Optional[Tuple[float, float]] = None
+    source: str = ""
+
+    def apply(self, raw_distance: float, plane_angle: float = 0.0) -> float:
+        """Apply calibration to a raw inter-plane distance.
+
+        Args:
+            raw_distance: Uncorrected distance in Angstroms.
+            plane_angle: Plane-plane angle in degrees (used for
+                angle-dependent calibration).
+
+        Returns:
+            Corrected distance, floored at 0.0.
+        """
+        if self.angle_bins is not None:
+            lo, hi = self.angle_bins
+            if not (lo <= plane_angle <= hi):
+                return raw_distance
+        corrected = self.slope * raw_distance + self.intercept
+        return max(0.0, corrected)
+
+
+def make_offset_calibration(
+    offset: float = -0.7,
+    source: str = "MMFF94s-to-Amber10:EHT offset",
+) -> DistanceCalibration:
+    """Create a simple additive offset calibration.
+
+    This is the most common calibration scenario: correcting a fixed
+    systematic bias between two force fields.
+
+    Args:
+        offset: Offset in Angstroms to add to raw distance.
+            Negative values shorten the distance (e.g., -0.7 maps
+            MMFF94s distances toward Amber10:EHT values).
+        source: Label for the calibration source.
+
+    Returns:
+        A frozen :class:`DistanceCalibration` with slope=1.0.
+
+    Example::
+
+        >>> cal = make_offset_calibration(-0.7)
+        >>> cal.apply(4.2)
+        3.5
+    """
+    return DistanceCalibration(slope=1.0, intercept=offset, source=source)
 
 
 def fit_plane_svd(coords: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -141,7 +218,12 @@ def calculate_plane_angle(coords1: np.ndarray, coords2: np.ndarray) -> float:
     return float(angle_deg)
 
 
-def calculate_interplane_distance(coords1: np.ndarray, coords2: np.ndarray) -> float:
+def calculate_interplane_distance(
+    coords1: np.ndarray,
+    coords2: np.ndarray,
+    plane_angle: Optional[float] = None,
+    warn: bool = True,
+) -> float:
     """
     Calculate the perpendicular distance between two planes.
 
@@ -151,6 +233,11 @@ def calculate_interplane_distance(coords1: np.ndarray, coords2: np.ndarray) -> f
     Args:
         coords1: Nx3 array of coordinates for the first plane.
         coords2: Mx3 array of coordinates for the second plane.
+        plane_angle: Optional plane-plane angle in degrees. If provided and
+            > 60°, a warning can be emitted because the perpendicular distance
+            metric becomes unreliable at high angles (measures edge-to-face
+            distance rather than π-π stacking distance).
+        warn: If True, emit a UserWarning when plane_angle is high.
 
     Returns:
         Perpendicular distance in Angstroms.
@@ -162,10 +249,14 @@ def calculate_interplane_distance(coords1: np.ndarray, coords2: np.ndarray) -> f
         >>> print(f"Distance: {distance:.2f} Å")  # Should be ~3.5 Å
 
     Notes:
-        Optimal π-stacking distances for pyrene excimers:
-        - 3.3-3.7 Å: Strong excimer formation
-        - 3.7-4.5 Å: Weak excimer
-        - > 4.5 Å: Monomer emission
+        Optimal π-stacking distances for aromatic excimers vary by system:
+        - Pyrene: 3.3-3.7 Å (strong), 3.7-4.5 Å (weak)
+        - Perylene: 3.4-3.8 Å (strong)
+        - Anthracene: 3.4-3.93 Å (strong)
+
+        At high plane angles (> 60°), this metric measures the edge-to-face
+        distance rather than the π-stacking distance. Use centroid_distance
+        as a more reliable alternative in those cases.
 
     References:
         - Stevens, B. (1968). Proc. Royal Soc. A, 305, 55-70.
@@ -179,6 +270,17 @@ def calculate_interplane_distance(coords1: np.ndarray, coords2: np.ndarray) -> f
 
     # Perpendicular distance is the projection onto the normal
     distance = np.abs(np.dot(vec, normal1))
+
+    # Warn when the metric is unreliable
+    if warn and plane_angle is not None and plane_angle > 60.0:
+        warnings.warn(
+            f"Inter-plane distance ({distance:.2f} A) may be unreliable at "
+            f"plane angle {plane_angle:.1f} deg (> 60 deg). At high angles, "
+            f"this metric measures edge-to-face distance, not pi-stacking "
+            f"distance. Consider using centroid_distance instead.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return float(distance)
 
@@ -327,11 +429,36 @@ def _calculate_overlap_shapely(
         poly1 = Polygon(vertices1)
         poly2 = Polygon(vertices2)
 
+        def _coerce_polygon(geom):
+            if geom is None:
+                return None
+            if geom.is_empty:
+                return geom
+            if geom.geom_type in ("Polygon", "MultiPolygon"):
+                return geom
+            if geom.geom_type == "GeometryCollection":
+                polys = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+                if not polys:
+                    return None
+                return unary_union(polys)
+            return None
+
         # Make valid if needed
         if not poly1.is_valid:
             poly1 = make_valid(poly1)
         if not poly2.is_valid:
             poly2 = make_valid(poly2)
+
+        poly1 = _coerce_polygon(poly1)
+        poly2 = _coerce_polygon(poly2)
+        if poly1 is None or poly2 is None:
+            return None, None, None
+
+        # Final cleanup for self-touching polygons
+        if not poly1.is_valid:
+            poly1 = poly1.buffer(0)
+        if not poly2.is_valid:
+            poly2 = poly2.buffer(0)
 
         # Calculate areas
         area1 = poly1.area
@@ -437,10 +564,14 @@ def calculate_pi_overlap(
     _, normal1 = fit_plane_svd(coords1)
     _, normal2 = fit_plane_svd(coords2)
 
+    # Align normals to avoid cancellation
+    if np.dot(normal1, normal2) < 0:
+        normal2 = -normal2
+
     # Use average normal for projection plane
     proj_normal = (normal1 + normal2) / 2
     norm = np.linalg.norm(proj_normal)
-    if norm > 0:
+    if norm > 1e-8:
         proj_normal = proj_normal / norm
     else:
         proj_normal = normal1  # Fallback if normals are opposite

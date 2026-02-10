@@ -1,0 +1,16 @@
+idx,name,type,SMILES,InChIKey,MW,heavy_atoms,logP,TPSA,HBA,HBD,rotatable_bonds,rings,aromatic_rings,C,N,O,P,S
+0,Dimer_pyrene2x_R2x_Et_each_pyrene,Dimer,CCc1ccc(CC)c2c1ccc1c3ccc(O[C@@H](C)Oc4cc(O[C@H](C)Oc5ccc6c(ccc7c6ccc6c(CC)ccc(CC)c67)c5)cc([C@@H](N)P(=O)(O)O)c4)cc3ccc12,SYNUCIUKKVFYQM-NWSHGZSRSA-N,871.36,64,13.6,120.47,6,3,14,9,9,55,1,7,1,0
+1,Dimer_pyrene2x_R2x_iPr_each_pyrene,Dimer,CC(C)c1ccc(C(C)C)c2c1ccc1c3ccc(O[C@H](C)Oc4cc(O[C@H](C)Oc5ccc6c(ccc7c6ccc6c(C(C)C)ccc(C(C)C)c67)c5)cc([C@H](N)P(=O)(O)O)c4)cc3ccc12,UNCJZNGUKQIWDW-SDSWSPLBSA-N,927.43,68,15.84,120.47,6,3,14,9,9,59,1,7,1,0
+2,Dimer_pyrene2x_R2x_cHex_each_pyrene,Dimer,C[C@H](Oc1cc(O[C@@H](C)Oc2ccc3c(ccc4c3ccc3c(C5CCCCC5)ccc(C5CCCCC5)c34)c2)cc([C@@H](N)P(=O)(O)O)c1)Oc1ccc2c(ccc3c2ccc2c(C4CCCCC4)ccc(C4CCCCC4)c23)c1,SDTQGRGNUYTSNM-ZSGTWBQWSA-N,1087.55,80,19.54,120.47,6,3,14,13,9,71,1,7,1,0
+3,Dimer_pyrene2x_R2x_tBu_each_pyrene,Dimer,C[C@H](Oc1cc(O[C@H](C)Oc2ccc3c(ccc4c3ccc3c(C(C)(C)C)ccc(C(C)(C)C)c34)c2)cc([C@H](N)P(=O)(O)O)c1)Oc1ccc2c(ccc3c2ccc2c(C(C)(C)C)ccc(C(C)(C)C)c23)c1,VJXVMEFTEUKCLA-SDSWSPLBSA-N,983.49,72,16.54,120.47,6,3,10,9,9,63,1,7,1,0
+4,Linker_diol_aminophosphonate,Linker_fragment,C[C@H](O)Oc1cc(O[C@@H](C)O)cc([C@@H](N)P(=O)(O)O)c1,LXIKGEQMESWAQR-CVJICSNFSA-N,307.08,20,0.26,142.47,6,5,6,1,1,11,1,7,1,0
+5,Pyrene,Pyrene,c1ccc2c(c1)ccc1c3ccccc3ccc21,WDECIBYCCFPHNR-UHFFFAOYSA-N,228.09,18,5.15,0.0,0,0,0,4,4,18,0,0,0,0
+6,Ethynyl_pyrene_guess,Pyrene_monomer,C#Cc1ccc2c(ccc3c4ccccc4ccc23)c1,JTKBXPSNBCFAJQ-UHFFFAOYSA-N,252.09,20,5.13,0.0,0,0,0,4,4,20,0,0,0,0
+7,Ethynyl_pyrene,Pyrene_monomer,C#Cc1ccc2c(ccc3c4ccccc4ccc23)c1,JTKBXPSNBCFAJQ-UHFFFAOYSA-N,252.09,20,5.13,0.0,0,0,0,4,4,20,0,0,0,0
+8,Me_thiophene_dicyanovinyl,Thiophene_component,Cc1csc(C=C(C#N)C#N)c1,LWGGZFVMUJQFBS-UHFFFAOYSA-N,174.03,12,2.49,47.58,3,0,1,1,1,9,2,0,0,1
+9,Me_thiophene_propionitrile_cyanophenyl,Thiophene_component,Cc1csc(C[C@H](C#N)c2ccc(C#N)cc2)c1,YWCUMMRNFFRECD-CQSZACIVSA-N,252.07,18,3.78,47.58,3,0,3,2,2,15,2,0,0,1
+10,Phenoxy_methyl_phosphonic_acid,Linker_fragment,O=P(O)(O)COc1ccccc1,OXWZBKRJVHTTES-UHFFFAOYSA-N,188.02,12,1.2,66.76,2,2,3,1,1,7,0,4,1,0
+11,Pyrene_R2_Et_O-H_attachment_site,Pyrene_monomer,CCc1ccc(CC)c2c1ccc1c3ccc(O)cc3ccc12,ZCWVTMZNVSWRSR-UHFFFAOYSA-N,300.15,23,5.98,20.23,1,1,2,4,4,22,0,1,0,0
+12,Pyrene_R2_iPr_O-H_attachment_site,Pyrene_monomer,CC(C)c1ccc(C(C)C)c2c1ccc1c3ccc(O)cc3ccc12,ZNJAHUPHMJOIRY-UHFFFAOYSA-N,328.18,25,7.1,20.23,1,1,2,4,4,24,0,1,0,0
+13,Pyrene_R2_cHex_O-H_attachment_site,Pyrene_monomer,Oc1ccc2c(ccc3c2ccc2c(C4CCCCC4)ccc(C4CCCCC4)c23)c1,MYJPGVBUQCRJOQ-UHFFFAOYSA-N,408.25,31,8.95,20.23,1,1,2,6,4,30,0,1,0,0
+14,Pyrene_R2_tBu_O-H_attachment_site,Pyrene_monomer,CC(C)(C)c1ccc(C(C)(C)C)c2c1ccc1c3ccc(O)cc3ccc12,BGYNFWSANCIFJF-UHFFFAOYSA-N,356.21,27,7.45,20.23,1,1,0,4,4,26,0,1,0,0

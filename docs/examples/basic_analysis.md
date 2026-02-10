@@ -11,7 +11,8 @@ from pyrene_analyzer import PyreneDimerAnalyzer
 from pyrene_analyzer.visualization import create_summary_figure
 
 # Define the input file containing your conformers
-input_file = "path/to/your/conformers.sdf"
+# Use the included sample file, or replace with your own SDF path
+input_file = "tests/test_data/pyrene_dimer_set_for_MOE.sdf"
 
 # Define the output file for the results
 output_csv = "analysis_results.csv"
@@ -58,5 +59,7 @@ The script will generate two files:
 
 -   `analysis_results.csv`: A CSV file containing the calculated geometric parameters for every conformer.
 -   `analysis_summary.png`: A summary plot showing distributions and correlations of the key parameters.
+
+The output includes a `geometry_warnings` column that flags high-angle conformers where the inter-plane distance is less reliable. These warnings are stored in the CSV rather than printed repeatedly during analysis.
 
 You can now use this data for further analysis, for example, to build QSAR models or to understand the conformational landscape of your pyrene dimer.

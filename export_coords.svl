@@ -1,0 +1,25 @@
+#svl
+
+// Try SaveAs approach
+function main []
+    // Method: open database, select all, save as SDF
+    local db = db_Open ['Dimer_Et_conformers.mdb', 'read'];
+    local entries = db_Entries db;
+    write ['Et entries: {}\n', length entries];
+
+    // Use db_ExportASCII to export property data
+    db_ExportASCII [db, 'Et_moe_properties.txt', entries,
+        ['E', 'dE', 'chi', 'rgyr', 'glob', 'ecc'], []];
+    write ['Exported Et properties\n'];
+    db_Close db;
+
+    db = db_Open ['iPr_conformers.mdb', 'read'];
+    entries = db_Entries db;
+    write ['iPr entries: {}\n', length entries];
+    db_ExportASCII [db, 'iPr_moe_properties.txt', entries,
+        ['E', 'dE', 'chi', 'rgyr', 'glob', 'ecc'], []];
+    write ['Exported iPr properties\n'];
+    db_Close db;
+
+    write ['Done!\n'];
+endfunction

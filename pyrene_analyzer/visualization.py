@@ -2,7 +2,7 @@
 Visualization Module
 ====================
 
-Functions for creating publication-quality plots of pyrene dimer analysis results.
+Functions for creating publication-quality plots of aromatic dimer analysis results.
 
 This module provides various plotting functions for visualizing:
 - Angle vs energy relationships
@@ -11,11 +11,15 @@ This module provides various plotting functions for visualizing:
 - Variant comparisons
 
 All plots are designed to be publication-ready with proper labels,
-legends, and formatting.
+legends, and formatting. Threshold values can be parameterized via
+the ``ClassificationThresholds`` dataclass to support different
+aromatic systems.
 """
 
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
+
+from pyrene_analyzer.aromatic_systems import ClassificationThresholds, get_system
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -55,6 +59,7 @@ def plot_angle_vs_energy(
     show_excimer_threshold: bool = True,
     alpha: float = 0.7,
     marker_size: int = 60,
+    thresholds: Optional[ClassificationThresholds] = None,
 ) -> plt.Figure:
     """
     Create a scatter plot of plane angle (θ) vs relative energy.
@@ -71,6 +76,8 @@ def plot_angle_vs_energy(
         show_excimer_threshold: If True, show vertical lines at excimer thresholds.
         alpha: Point transparency.
         marker_size: Size of scatter points.
+        thresholds: Classification thresholds to use for excimer region shading.
+            If None, uses pyrene defaults.
 
     Returns:
         Matplotlib Figure object.
@@ -79,11 +86,14 @@ def plot_angle_vs_energy(
         >>> fig = plot_angle_vs_energy(results, output='angle_energy.png')
 
     Notes:
-        Excimer formation thresholds:
+        Excimer formation thresholds depend on the aromatic system.
+        Default (pyrene):
         - θ < 20°: Strong excimer (green region)
         - θ = 20-60°: Weak excimer (yellow region)
         - θ > 60°: Monomer (red region)
     """
+    if thresholds is None:
+        thresholds = get_system("pyrene").thresholds
     fig, ax = _setup_figure(figsize=figsize)
 
     # Determine energy column
@@ -132,8 +142,10 @@ def plot_angle_vs_energy(
 
     # Add excimer threshold lines
     if show_excimer_threshold:
+        strong_max = thresholds.strong_angle_max
+        weak_max = thresholds.weak_angle_max
         ax.axvline(
-            x=20,
+            x=strong_max,
             color="green",
             linestyle="--",
             alpha=0.5,
@@ -141,7 +153,7 @@ def plot_angle_vs_energy(
             label="Strong excimer threshold",
         )
         ax.axvline(
-            x=60,
+            x=weak_max,
             color="orange",
             linestyle="--",
             alpha=0.5,
@@ -151,9 +163,9 @@ def plot_angle_vs_energy(
 
         # Add shaded regions
         ylim = ax.get_ylim()
-        ax.axvspan(0, 20, alpha=0.1, color="green")
-        ax.axvspan(20, 60, alpha=0.1, color="yellow")
-        ax.axvspan(60, 90, alpha=0.1, color="red")
+        ax.axvspan(0, strong_max, alpha=0.1, color="green")
+        ax.axvspan(strong_max, weak_max, alpha=0.1, color="yellow")
+        ax.axvspan(weak_max, 90, alpha=0.1, color="red")
         ax.set_ylim(ylim)
 
     # Labels and title
@@ -164,11 +176,11 @@ def plot_angle_vs_energy(
     if title:
         ax.set_title(title, fontsize=14, fontweight="bold")
     else:
-        ax.set_title(
-            "Plane Angle vs Energy for Pyrene Dimer Conformers",
-            fontsize=14,
-            fontweight="bold",
-        )
+        if energy_col == "_energy":
+            default_title = "Plane Angle vs Conformer Index for Aromatic Dimer Conformers"
+        else:
+            default_title = "Plane Angle vs Energy for Aromatic Dimer Conformers"
+        ax.set_title(default_title, fontsize=14, fontweight="bold")
 
     ax.set_xlim(0, 90)
 
@@ -187,6 +199,7 @@ def plot_distance_vs_overlap(
     show_optimal_region: bool = True,
     alpha: float = 0.7,
     marker_size: int = 60,
+    thresholds: Optional[ClassificationThresholds] = None,
 ) -> plt.Figure:
     """
     Create a scatter plot of inter-plane distance vs π-overlap.
@@ -203,6 +216,8 @@ def plot_distance_vs_overlap(
         show_optimal_region: If True, highlight optimal excimer region.
         alpha: Point transparency.
         marker_size: Size of scatter points.
+        thresholds: Classification thresholds to use for optimal region.
+            If None, uses pyrene defaults.
 
     Returns:
         Matplotlib Figure object.
@@ -211,10 +226,11 @@ def plot_distance_vs_overlap(
         >>> fig = plot_distance_vs_overlap(results, color_by='molecule')
 
     Notes:
-        Optimal excimer formation region:
-        - Distance: 3.3-3.7 Å
-        - Overlap: > 70%
+        Optimal excimer formation region depends on the aromatic system.
+        Default (pyrene): distance 3.3-3.7 Å, overlap > 50%.
     """
+    if thresholds is None:
+        thresholds = get_system("pyrene").thresholds
     fig, ax = _setup_figure(figsize=figsize)
 
     # Create scatter plot
@@ -252,10 +268,12 @@ def plot_distance_vs_overlap(
 
     # Highlight optimal excimer region
     if show_optimal_region:
+        d_min, d_max = thresholds.strong_distance_range
+        overlap_min = thresholds.strong_overlap_min
         rect = mpatches.Rectangle(
-            (3.3, 70),
-            0.4,
-            30,
+            (d_min, overlap_min),
+            d_max - d_min,
+            100 - overlap_min,
             linewidth=2,
             edgecolor="green",
             facecolor="green",
@@ -392,6 +410,7 @@ def plot_variant_comparison(
     output: Optional[Union[str, Path]] = None,
     parameter: str = "plane_angle_deg",
     figsize: Tuple[float, float] = (12, 6),
+    thresholds: Optional[ClassificationThresholds] = None,
 ) -> plt.Figure:
     """
     Create box plots comparing geometric parameters across R-group variants.
@@ -402,6 +421,8 @@ def plot_variant_comparison(
         output: Optional path to save the figure.
         parameter: Parameter to compare.
         figsize: Figure size in inches.
+        thresholds: Classification thresholds to use for reference lines.
+            If None, uses pyrene defaults.
 
     Returns:
         Matplotlib Figure object.
@@ -413,6 +434,8 @@ def plot_variant_comparison(
         ...     parameter='plane_angle_deg'
         ... )
     """
+    if thresholds is None:
+        thresholds = get_system("pyrene").thresholds
     fig, ax = _setup_figure(figsize=figsize)
 
     if variants is None:
@@ -424,7 +447,7 @@ def plot_variant_comparison(
     if plot_data.empty:
         raise ValueError("No data found for specified variants")
 
-    # Create box plot
+    # Create box plot (orientation inferred from x/y assignment)
     sns.boxplot(
         data=plot_data,
         x="molecule",
@@ -468,14 +491,14 @@ def plot_variant_comparison(
     # Add excimer threshold for angle
     if parameter == "plane_angle_deg":
         ax.axhline(
-            y=20,
+            y=thresholds.strong_angle_max,
             color="green",
             linestyle="--",
             alpha=0.5,
             label="Strong excimer threshold",
         )
         ax.axhline(
-            y=60,
+            y=thresholds.weak_angle_max,
             color="orange",
             linestyle="--",
             alpha=0.5,
@@ -621,6 +644,7 @@ def create_summary_figure(
     df: pd.DataFrame,
     output: Optional[Union[str, Path]] = None,
     figsize: Tuple[float, float] = (16, 12),
+    thresholds: Optional[ClassificationThresholds] = None,
 ) -> plt.Figure:
     """
     Create a comprehensive summary figure with multiple panels.
@@ -629,6 +653,8 @@ def create_summary_figure(
         df: DataFrame with analysis results.
         output: Optional path to save the figure.
         figsize: Figure size in inches.
+        thresholds: Classification thresholds for the aromatic system.
+            If None, uses pyrene defaults.
 
     Returns:
         Matplotlib Figure object.
@@ -758,7 +784,7 @@ def create_summary_figure(
         ax6.set_title("Summary Statistics")
 
     plt.suptitle(
-        "Pyrene Dimer Conformational Analysis Summary", fontsize=16, fontweight="bold"
+        "Aromatic Dimer Conformational Analysis Summary", fontsize=16, fontweight="bold"
     )
 
     _save_figure(fig, output)
