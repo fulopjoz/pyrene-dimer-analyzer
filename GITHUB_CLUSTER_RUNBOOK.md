@@ -1,45 +1,43 @@
 # GitHub + Cluster Runbook
 
 ## Scope
-This runbook describes how to:
-1. Stop local long-running jobs.
-2. Prepare a clean, portable GitHub repository.
-3. Clone and run on a GPU cluster with faster throughput.
-4. Run large re-optimization workloads safely (resume + chunking).
+This runbook is the operational checklist to:
+1. Finalize and push this repository to GitHub.
+2. Run reproducible validation locally.
+3. Move production compute to a stronger Linux server (24 CPU + 2 GPUs, no scheduler yet).
+4. Execute full MACE re-optimization efficiently with dual-GPU chunking.
 
-The repo was updated for performance and portability:
-- `reoptimize_moe_conformers.py` now supports:
-  - `--device auto|cpu|cuda` (default `auto`)
-  - default model `small`
-  - `--fmax`
-  - `--mace-dtype float64|float32`
-  - `--save-every`
-  - `--start-index` / `--end-index` (chunked jobs)
-- `pyrene_analyzer/mace_optimizer.py` now supports `default_dtype`.
-- `.gitignore` updated to avoid committing generated outputs/local binaries.
+## Current Technical Status (Verified)
+1. `validate_mace.py` is wired correctly:
+   - xTB path calls `optimize_with_gfn2xtb` (no stale `optimize_conformer` import).
+   - Benchmark starts at `initial_distance=4.0 A`.
+   - Tight convergence is used (`fmax=0.005`, higher step limits).
+2. Validation benchmark output is saved in `validation_results.csv`.
+3. Large-file check passed: no files >49 MB in the repo.
+4. Local WSL environment detects CUDA (`torch.cuda.is_available() == True`).
 
-## 1. Stop Local Jobs (if running)
-From Windows PowerShell:
+## 1. Stop Local Jobs Before Packaging
+From PowerShell:
 
 ```powershell
 wsl -d Ubuntu-24.04 -- bash -lc "ps -ef | rg -n 'reoptimize_moe_conformers.py|validate_mace.py|run_screening_xtb.py' || true"
 ```
 
-If jobs are found and should be terminated:
+If jobs should be terminated:
 
 ```powershell
 wsl -d Ubuntu-24.04 -- bash -lc "pkill -f 'reoptimize_moe_conformers.py|validate_mace.py|run_screening_xtb.py' || true"
 ```
 
-Verify no residual jobs:
+Recheck:
 
 ```powershell
 wsl -d Ubuntu-24.04 -- bash -lc "ps -ef | rg -n 'reoptimize_moe_conformers.py|validate_mace.py|run_screening_xtb.py' || true"
 ```
 
-## 2. Validate Local Repo Before Push
+## 2. Pre-Push Validation
 
-### 2.1 Confirm no file exceeds 49 MB
+### 2.1 Verify File Size Policy (<49 MB)
 
 ```powershell
 @'
@@ -64,44 +62,47 @@ for sz, p in sorted(big, reverse=True):
 '@ | python -
 ```
 
-### 2.2 Run quick correctness checks
+Expected output for a clean repo is exactly `count> 0` (meaning zero files exceeded 49 MB).
+
+### 2.2 Run Regression + Benchmark Checks
 
 ```powershell
-python -m pytest tests/test_validate_mace.py
+python -m pytest tests/test_validate_mace.py -q
 wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/dodo/Documents/projects/pyrene-dimer-analyzer && ./bin/micromamba run -n pyrene-xtb python validate_mace.py --all-methods --output validation_results.csv"
 ```
 
-## 3. Prepare Clean Commit
+Expected:
+1. No xTB import failure.
+2. Numeric GFN2-xTB rows in `validation_results.csv`.
+3. MACE small pyrene error within pass threshold (`|error| < 0.2 A`).
 
-### 3.1 Review what will be committed
+## 3. Commit + Push to GitHub
+
+### 3.1 Review Changes
 
 ```powershell
-git status
+git status -sb
 git diff -- . ':!*.csv' ':!*.png'
 ```
 
-### 3.2 Stage recommended files for compute portability
-This stages code, configs, docs, and required input data only.
+### 3.2 Stage Recommended Files
 
 ```powershell
 git add `
-  .gitignore `
-  pyproject.toml `
-  requirements.txt `
-  requirements-dev.txt `
-  pyrene_analyzer `
   validate_mace.py `
-  reoptimize_moe_conformers.py `
-  run_screening_xtb.py `
-  compare_methods.py `
   tests/test_validate_mace.py `
-  binaph_dimer_smiles.csv `
-  moe_conformers/cnph_th_cf3_3d_conformers.sdf `
+  reoptimize_moe_conformers.py `
+  pyrene_analyzer/mace_optimizer.py `
   GITHUB_CLUSTER_RUNBOOK.md `
-  README.md
+  docs/scientific-analysis/mace_validation.md `
+  docs/COMPUTE_EXECUTION_PLAN.md `
+  scripts/cluster_preflight.sh `
+  scripts/run_dual_gpu_reopt.sh `
+  scripts/merge_reopt_chunks.py `
+  NEXT_CHAT_HANDOFF_PROMPT.md
 ```
 
-Then inspect staged files:
+Check staged set:
 
 ```powershell
 git diff --cached --name-status
@@ -110,150 +111,131 @@ git diff --cached --name-status
 Commit:
 
 ```powershell
-git commit -m "Optimize MACE runtime workflow, add chunked GPU execution controls, and cluster runbook"
+git commit -m "Finalize MACE validation wiring, add cluster run automation, and document compute migration"
 ```
 
-## 4. Create and Push GitHub Repository
-
-If repo is not initialized remotely yet:
-
-```powershell
-git remote add origin https://github.com/<your-org-or-user>/<repo-name>.git
-git branch -M main
-git push -u origin main
-```
-
-If remote already exists:
+Push:
 
 ```powershell
 git push
 ```
 
-## 5. Clone and Set Up on Cluster
-
-## 5.1 Clone
+## 4. Clone on the New Linux Server
 
 ```bash
-git clone https://github.com/<your-org-or-user>/<repo-name>.git
-cd <repo-name>
+git clone https://github.com/fulopjoz/pyrene-dimer-analyzer.git
+cd pyrene-dimer-analyzer
 ```
 
-## 5.2 Create environment
-Using micromamba (recommended):
+## 5. Environment Setup on Server
 
 ```bash
-micromamba create -n pyrene-mace python=3.11 -y
-micromamba activate pyrene-mace
+micromamba create -n pyrene-xtb python=3.11 -y
+micromamba activate pyrene-xtb
 python -m pip install --upgrade pip
 python -m pip install -e ".[mace]"
+python -m pip install xtb-python ase
 ```
 
-If your cluster requires explicit CUDA torch wheel, install torch first per cluster policy, then:
+If your server policy requires manual torch install, install torch first, then:
 
 ```bash
 python -m pip install -e .
-python -m pip install mace-torch ase
+python -m pip install mace-torch ase xtb-python
 ```
 
-## 5.3 Verify GPU is visible
+## 6. Server Preflight (No Scheduler)
+Run the shipped preflight script:
 
 ```bash
-nvidia-smi
-python - <<'PY'
-import torch
-print("torch", torch.__version__)
-print("cuda_available", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("device", torch.cuda.get_device_name(0))
-PY
+bash scripts/cluster_preflight.sh
 ```
 
-## 6. Smoke Tests on Cluster
+This checks:
+1. Python + package imports (`torch`, `rdkit`, `ase`, `mace`, `xtb`).
+2. GPU visibility and memory.
+3. Required input files.
+
+## 7. Smoke Tests on Server
 
 ```bash
-python -m pytest tests/test_validate_mace.py
+python -m pytest tests/test_validate_mace.py -q
 python validate_mace.py --all-methods --output validation_results.csv
-python reoptimize_moe_conformers.py --test --model small --device auto --max-steps 500 --fmax 0.005 --output-prefix smoke
+python reoptimize_moe_conformers.py --test --model small --device cuda --mace-dtype float64 --max-steps 500 --fmax 0.005 --save-every 1 --output-prefix smoke
 ```
 
-## 7. Production Runs
+## 8. Production Runs (No Batch System Yet)
 
-### 7.1 Single-job (simple)
+### 8.1 Dual-GPU Recommended Path
 
 ```bash
-python reoptimize_moe_conformers.py \
+bash scripts/run_dual_gpu_reopt.sh \
   --model small \
-  --device auto \
   --mace-dtype float64 \
   --max-steps 500 \
   --fmax 0.005 \
   --save-every 25 \
-  --resume \
+  --output-dir runs \
   --output-prefix moe_mace_reopt
 ```
 
-### 7.2 Faster (if acceptable): float32 on GPU
+This automatically:
+1. Counts conformers from the SDF.
+2. Splits into two index ranges.
+3. Launches one process per GPU (`CUDA_VISIBLE_DEVICES=<gpu>`).
+4. Writes logs + per-GPU CSVs.
+5. Merges chunk outputs into final `_all_conformers.csv` and `_summary.csv`.
+
+### 8.2 Faster Throughput Mode (if acceptable)
 
 ```bash
-python reoptimize_moe_conformers.py \
+bash scripts/run_dual_gpu_reopt.sh \
   --model small \
-  --device cuda \
   --mace-dtype float32 \
   --max-steps 500 \
   --fmax 0.005 \
   --save-every 25 \
-  --resume \
+  --output-dir runs_f32 \
   --output-prefix moe_mace_reopt_f32
 ```
 
-### 7.3 Chunked array jobs (recommended for clusters)
-Use index windows to split the 3347 conformers.
-
-Example shell logic per chunk:
+## 9. Manual Merge (if needed)
+If you rerun chunks manually, merge them with:
 
 ```bash
-CHUNK=200
-START=$((TASK_ID * CHUNK))
-END=$((START + CHUNK))
+python scripts/merge_reopt_chunks.py \
+  --input-glob "runs/moe_mace_reopt_gpu*_all_conformers.csv" \
+  --output-dir runs \
+  --output-prefix moe_mace_reopt
+```
 
-python reoptimize_moe_conformers.py \
+## 10. Runtime Guidance
+Based on local measurements in this repo:
+1. CPU-only MACE (float64) is too slow for production.
+2. GPU float64 is scientifically safest for geometry optimization.
+3. GPU float32 is much faster and suitable for pre-screening.
+4. Best practice:
+   - Bulk screening: `small + float32 + dual GPU`
+   - Final shortlist: rerun with `small/medium + float64`
+
+## 11. Troubleshooting
+1. `cuequivariance ... not available` is non-fatal; runs continue.
+2. `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` warnings are non-fatal.
+3. If one GPU process fails, inspect:
+   - `runs/<prefix>_gpu0.log`
+   - `runs/<prefix>_gpu1.log`
+4. Resume failed chunk manually:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python reoptimize_moe_conformers.py \
+  --resume \
+  --start-index <start> \
+  --end-index <end> \
+  --output-prefix runs/<prefix>_gpu0 \
   --model small \
   --device cuda \
   --mace-dtype float64 \
   --max-steps 500 \
   --fmax 0.005 \
-  --save-every 25 \
-  --start-index ${START} \
-  --end-index ${END} \
-  --output-prefix runs/moe_mace_chunk_${TASK_ID}
+  --save-every 25
 ```
-
-## 8. Merge Chunk Outputs
-
-```bash
-python - <<'PY'
-from pathlib import Path
-import pandas as pd
-
-parts = sorted(Path("runs").glob("moe_mace_chunk_*_all_conformers.csv"))
-dfs = [pd.read_csv(p) for p in parts if p.exists()]
-if not dfs:
-    raise SystemExit("No chunk files found")
-df = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["name", "conformer_id"])
-df.to_csv("moe_mace_reopt_all_conformers.csv", index=False)
-print("merged rows:", len(df))
-PY
-```
-
-Then regenerate summaries if needed by rerunning aggregation/analysis scripts.
-
-## 9. Recommended Cluster Practices
-1. Use local scratch for intermediate outputs, then copy final CSVs to project storage.
-2. Keep `--save-every` modest (e.g., 25-100) to reduce I/O overhead.
-3. Prefer `small + cuda` for bulk, then re-run top candidates with `medium`.
-4. Keep `--resume` enabled for long jobs.
-
-## 10. Notes
-1. `cuequivariance` acceleration is optional; absence does not block runs.
-2. `float64` is scientifically safer; `float32` is faster.
-3. Generated output files are intentionally ignored by `.gitignore` to keep GitHub clean.
