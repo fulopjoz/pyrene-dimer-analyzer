@@ -71,7 +71,10 @@ The regression tests confirm:
 4. Unchanged pyrene pass/fail threshold logic.
 
 ## References
-1. Batatia et al. (2024), MACE-OFF23 foundation model, arXiv:2401.00096.
+1. Batatia et al. (2024), MACE-OFF23 foundation model, arXiv:2401.00096  
+   https://arxiv.org/abs/2401.00096
 2. Jurecka et al. (2006), S22 noncovalent benchmark set, PCCP 8, 1985.
-3. Bannwarth et al. (2019), GFN2-xTB, JCTC 15, 1652-1671.
-4. Pyrene dimer benchmark source: PMC11476719 (2024), DLPNO-CCSD(T)/CBS.
+3. Bannwarth et al. (2019), GFN2-xTB, JCTC 15, 1652-1671  
+   https://doi.org/10.1021/acs.jctc.8b01176
+4. Pyrene dimer benchmark source: PMC11476719 (2024), DLPNO-CCSD(T)/CBS  
+   https://pmc.ncbi.nlm.nih.gov/articles/PMC11476719/
