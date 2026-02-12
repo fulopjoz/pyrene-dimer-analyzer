@@ -38,3 +38,18 @@ Start by running this checklist and summarize findings with exact commands and o
 
 Then propose the exact dual-GPU command for the full run on this server and estimate runtime from measured smoke timing.
 ```
+
+## Follow-up Prompt (Post-MACE Completion)
+```text
+MACE chunk runs are complete and merged. Continue with ORCA excited-state phase using repo scripts:
+1) python scripts/orca_select_candidates.py ...
+2) python scripts/orca_prepare_inputs.py ...
+3) python scripts/orca_run_queue.py --resume ...
+4) python scripts/orca_collect_results.py ...
+
+Provide a concise QC report:
+- total jobs
+- failed jobs
+- how many vertical jobs returned parsed S1 energies and oscillator strengths
+- list top candidates by lowest S1 energy and strongest fosc
+```

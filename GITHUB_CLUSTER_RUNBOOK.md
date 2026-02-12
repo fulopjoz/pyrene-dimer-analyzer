@@ -239,3 +239,24 @@ CUDA_VISIBLE_DEVICES=0 python reoptimize_moe_conformers.py \
   --fmax 0.005 \
   --save-every 25
 ```
+
+## 12. Next Phase: ORCA Excited-State Jobs
+After MACE re-optimization is complete and merged:
+1. Build ORCA shortlist and inputs.
+2. Run TD-DFT queue locally (no scheduler).
+3. Collect parsed excited-state summary.
+
+Quick command:
+
+```bash
+bash scripts/run_orca_next_steps.sh
+```
+
+Manual steps are documented in:
+- `docs/ORCA_EXCITED_STATE_WORKFLOW.md`
+
+If `rg` is not installed on server, replace process checks with `grep`:
+
+```bash
+ps -ef | grep -E "run_dual_gpu_reopt|reoptimize_moe_conformers.py|orca_run_queue.py" | grep -v grep
+```
