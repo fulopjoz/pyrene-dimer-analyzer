@@ -70,6 +70,15 @@ if [[ "${DRY_RUN}" == "1" ]]; then
 fi
 "${PYTHON_BIN}" scripts/orca_run_queue.py "${QUEUE_ARGS[@]}"
 
+if [[ "${DRY_RUN}" == "1" ]]; then
+  echo
+  echo "Dry-run mode: skipping ORCA output collection step."
+  echo "Review:"
+  echo "  runs/orca_jobs/orca_job_manifest.csv"
+  echo "  runs/orca_jobs/orca_run_summary.csv"
+  exit 0
+fi
+
 echo
 echo "== ORCA Phase: collect results =="
 "${PYTHON_BIN}" scripts/orca_collect_results.py \
